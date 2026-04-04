@@ -17,7 +17,7 @@ const textColour = (pct, isExceeding) => {
 };
 
 export default function AllowanceCard({ allowance }) {
-  const { maxAllowance, usedAllowance, remainingAllowance, percentUsed, isExceeding, warning, employeeGross, employerGross } = allowance;
+  const { maxAllowance, usedAllowance, remainingAllowance, percentUsed, isExceeding, warning, sacrificeGross, employerGross } = allowance;
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
@@ -44,7 +44,7 @@ export default function AllowanceCard({ allowance }) {
       <div className="space-y-2 text-sm mb-4">
         <div className="flex justify-between">
           <span className="text-slate-600">Your contribution (gross)</span>
-          <span className="font-medium tabular-nums">{formatCurrency(employeeGross)}</span>
+          <span className="font-medium tabular-nums">{formatCurrency(sacrificeGross)}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-slate-600">Employer contribution</span>

@@ -6,7 +6,39 @@
  *    Mode toggle lets user enter these as % of salary or flat £ per year.
  *  - Personal pension (SIPP / relief at source): always entered as the
  *    net annual £ amount the employee physically pays; HMRC adds 20%.
+ *
+ * displayPeriod (annual | monthly) matches ContributionsCard: stored values
+ * remain annual; in monthly mode £ fields show/edit monthly equivalents.
  */
+
+const r2 = (n) => Math.round(n * 100) / 100;
+
+/** Fields stored as annual £ in app state but shown as monthly £ when isMonthly */
+function usesCurrencyPeriod(field, contributionMode) {
+  if (field === 'grossSalary' || field === 'personalPensionNet' || field === 'sharePlanContribution') return true;
+  if (contributionMode === 'nominal' && (field === 'employeeValue' || field === 'employerValue')) {
+    return true;
+  }
+  return false;
+}
+
+function annualToDisplay(annualStr, field, isMonthly, contributionMode) {
+  if (!usesCurrencyPeriod(field, contributionMode)) return annualStr;
+  if (!isMonthly) return annualStr;
+  if (annualStr === '' || annualStr === undefined) return '';
+  const a = Number(annualStr);
+  if (isNaN(a)) return annualStr;
+  return String(r2(a / 12));
+}
+
+function fromDisplay(field, raw, isMonthly, contributionMode) {
+  if (!usesCurrencyPeriod(field, contributionMode)) return raw;
+  if (!isMonthly) return raw;
+  if (raw === '') return '';
+  const m = Number(raw);
+  if (isNaN(m)) return raw;
+  return String(r2(m * 12));
+}
 
 const InputField = ({ label, hint, prefix, suffix, value, onChange, min = 0, max, step = 1 }) => (
   <div>
@@ -61,14 +93,44 @@ const ModeToggle = ({ contributionMode, onModeToggle }) => (
   </div>
 );
 
-export default function InputForm({ values, onChange, contributionMode, onModeToggle }) {
-  const handleChange = (field) => (val) => onChange(field, val);
+export default function InputForm({
+  values,
+  onChange,
+  contributionMode,
+  onModeToggle,
+  displayPeriod = 'annual',
+  taxRegion = 'england',
+}) {
+  const isMonthly = displayPeriod === 'monthly';
+
+  const handleFieldChange = (field) => (val) => {
+    onChange(field, fromDisplay(field, val, isMonthly, contributionMode));
+  };
 
   // Salary sacrifice fields (employee + employer) follow the mode toggle
   const isPercent = contributionMode === 'percent';
   const sacrificeProps = isPercent
-    ? { suffix: '%', prefix: undefined, max: 100,       step: 0.5, hint: '% of salary — before tax & NI' }
-    : { prefix: '£', suffix: undefined, max: 10000000,  step: 100, hint: 'annual gross £ — before tax & NI' };
+    ? { suffix: '%', prefix: undefined, max: 100, step: 0.5, hint: '% of salary — before tax & NI' }
+    : {
+        prefix: '£',
+        suffix: undefined,
+        max: isMonthly ? Math.ceil(10000000 / 12) : 10000000,
+        step: isMonthly ? 50 : 100,
+        hint: isMonthly
+          ? 'monthly gross £ — before tax & NI'
+          : 'annual gross £ — before tax & NI',
+      };
+
+  const grossLabel = isMonthly ? 'Gross Monthly Salary' : 'Gross Annual Salary';
+  const grossHint = isMonthly ? 'before tax, per month' : 'before tax';
+  const grossMax = isMonthly ? Math.ceil(10000000 / 12) : 10000000;
+  const grossStep = isMonthly ? 100 : 1000;
+
+  const personalHint = isMonthly
+    ? 'net monthly £ you pay — HMRC adds 20%'
+    : 'net annual £ you pay — HMRC adds 20%';
+  const personalMax = isMonthly ? Math.ceil(10000000 / 12) : 10000000;
+  const personalStep = isMonthly ? 50 : 100;
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
@@ -84,14 +146,14 @@ export default function InputForm({ values, onChange, contributionMode, onModeTo
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* Gross salary */}
         <InputField
-          label="Gross Annual Salary"
-          hint="before tax"
+          label={grossLabel}
+          hint={grossHint}
           prefix="£"
-          value={values.grossSalary}
-          onChange={handleChange('grossSalary')}
+          value={annualToDisplay(values.grossSalary, 'grossSalary', isMonthly, contributionMode)}
+          onChange={handleFieldChange('grossSalary')}
           min={0}
-          max={10000000}
-          step={1000}
+          max={grossMax}
+          step={grossStep}
         />
 
         {/* Salary sacrifice — employee */}
@@ -100,8 +162,8 @@ export default function InputForm({ values, onChange, contributionMode, onModeTo
           hint={sacrificeProps.hint}
           prefix={sacrificeProps.prefix}
           suffix={sacrificeProps.suffix}
-          value={values.employeeValue}
-          onChange={handleChange('employeeValue')}
+          value={annualToDisplay(values.employeeValue, 'employeeValue', isMonthly, contributionMode)}
+          onChange={handleFieldChange('employeeValue')}
           min={0}
           max={sacrificeProps.max}
           step={sacrificeProps.step}
@@ -113,8 +175,8 @@ export default function InputForm({ values, onChange, contributionMode, onModeTo
           hint={sacrificeProps.hint}
           prefix={sacrificeProps.prefix}
           suffix={sacrificeProps.suffix}
-          value={values.employerValue}
-          onChange={handleChange('employerValue')}
+          value={annualToDisplay(values.employerValue, 'employerValue', isMonthly, contributionMode)}
+          onChange={handleFieldChange('employerValue')}
           min={0}
           max={sacrificeProps.max}
           step={sacrificeProps.step}
@@ -123,14 +185,86 @@ export default function InputForm({ values, onChange, contributionMode, onModeTo
         {/* Personal pension (SIPP) — always net £ */}
         <InputField
           label="Personal Pension Contribution"
-          hint="net annual £ you pay — HMRC adds 20%"
+          hint={personalHint}
           prefix="£"
-          value={values.personalPensionNet}
-          onChange={handleChange('personalPensionNet')}
+          value={annualToDisplay(values.personalPensionNet, 'personalPensionNet', isMonthly, contributionMode)}
+          onChange={handleFieldChange('personalPensionNet')}
           min={0}
-          max={10000000}
-          step={100}
+          max={personalMax}
+          step={personalStep}
         />
+
+        <div className="sm:col-span-2">
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Share plan (company shares / SIP)
+            <span className="ml-1 text-slate-400 font-normal text-xs">
+              (annual £ invested — pre-tax reduces taxable income; post-tax does not)
+            </span>
+          </label>
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+            <div className="relative flex-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm font-medium select-none">
+                £
+              </span>
+              <input
+                type="number"
+                min={0}
+                max={personalMax}
+                step={personalStep}
+                value={annualToDisplay(
+                  values.sharePlanContribution,
+                  'sharePlanContribution',
+                  isMonthly,
+                  contributionMode,
+                )}
+                onChange={(e) => handleFieldChange('sharePlanContribution')(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-7 pr-3 text-sm text-slate-900
+                  focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                placeholder="0"
+              />
+            </div>
+            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50 gap-0.5 shrink-0">
+              {[
+                { id: 'post_tax', label: 'Post-tax' },
+                { id: 'pre_tax', label: 'Pre-tax' },
+              ].map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => onChange('sharePlanType', id)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all
+                    ${(values.sharePlanType || 'post_tax') === id
+                      ? 'bg-white shadow-sm text-slate-900'
+                      : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {taxRegion === 'scotland' && (
+          <div className="sm:col-span-2 pt-2 border-t border-slate-100">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={values.studentLoanPlan === 'plan_4'}
+                onChange={(e) => onChange('studentLoanPlan', e.target.checked ? 'plan_4' : '')}
+                className="mt-1 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>
+                <span className="block text-sm font-medium text-slate-700">
+                  Student Loan Plan 4 (Scotland)
+                </span>
+                <span className="block text-xs text-slate-500 mt-0.5">
+                  Repayment is calculated on gross income above the Plan 4 threshold and deducted from
+                  take-home after tax — it does not reduce taxable income.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
       </div>
     </div>
   );

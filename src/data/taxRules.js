@@ -9,8 +9,7 @@ export const TAX_RULES = {
   currentYear: "2025/26",
 
   // ----------------------------------------------------------
-  // Income Tax Bands (England, Wales & Northern Ireland)
-  // Scotland sets its own bands - toggle planned for future.
+  // Income Tax — England, Wales & Northern Ireland (2025/26)
   // Personal allowance is frozen at £12,570 until 2027/28.
   // ----------------------------------------------------------
   incomeTax: {
@@ -23,12 +22,32 @@ export const TAX_RULES = {
       { name: "Additional Rate",    min: 125141,  max: Infinity, rate: 45 },
     ],
 
-    // Personal allowance tapers at £1 per £2 over £100,000
-    // Fully withdrawn at adjusted net income of £125,140
     personalAllowanceTaperStart: 100000,
     personalAllowanceTaperEnd:   125140,
 
     basicRateBandWidth: 37700, // £12,571–£50,270
+  },
+
+  // ----------------------------------------------------------
+  // Income Tax — Scotland only (2025/26)
+  // Source: gov.scot Scottish Income Tax bands. Rest of UK uses incomeTax above.
+  // NI is UK-wide (same Class 1 primary as elsewhere).
+  // ----------------------------------------------------------
+  incomeTaxScotland: {
+    personalAllowance: 12570,
+
+    bands: [
+      { name: "Personal Allowance", min: 0,       max: 12570,    rate: 0  },
+      { name: "Starter Rate",       min: 12571,   max: 15397,    rate: 19 },
+      { name: "Scottish Basic Rate", min: 15398,  max: 27491,    rate: 20 },
+      { name: "Intermediate Rate",  min: 27492,   max: 43662,    rate: 21 },
+      { name: "Scottish Higher Rate", min: 43663, max: 75000,    rate: 42 },
+      { name: "Advanced Rate",      min: 75001,   max: 125140,   rate: 45 },
+      { name: "Top Rate",           min: 125141,  max: Infinity, rate: 48 },
+    ],
+
+    personalAllowanceTaperStart: 100000,
+    personalAllowanceTaperEnd:   125140,
   },
 
   // ----------------------------------------------------------
@@ -90,6 +109,18 @@ export const TAX_RULES = {
   },
 
   // ----------------------------------------------------------
+  // Student loan — Plan 4 (Scotland) repayment via PAYE
+  // Threshold and rate: update with HMRC / Student Loans Company guidance each year.
+  // Repayments are on income above the threshold; not deductible for income tax.
+  // ----------------------------------------------------------
+  studentLoan: {
+    plan4: {
+      threshold: 32745, // £/year — income above this is liable at ratePercent
+      ratePercent: 9,
+    },
+  },
+
+  // ----------------------------------------------------------
   // High Income Child Benefit Charge
   // ----------------------------------------------------------
   childBenefit: {
@@ -109,3 +140,13 @@ export const TAX_RULES = {
     "2021/22": { annualAllowance: 40000, personalAllowance: 12570 },
   },
 };
+
+/** @param {'england' | 'scotland'} taxRegion */
+export function getIncomeTaxRules(taxRegion) {
+  return taxRegion === 'scotland' ? TAX_RULES.incomeTaxScotland : TAX_RULES.incomeTax;
+}
+
+/** Normalise DB / API values */
+export function normalizeTaxRegion(value) {
+  return value === 'scotland' ? 'scotland' : 'england';
+}

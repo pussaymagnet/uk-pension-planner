@@ -51,6 +51,24 @@ Save. Sign up / sign in on the live site should work after this.
 
 ---
 
+## Supabase: budget debts table (Household Budget)
+
+If you use **sign-in** and the **Household Budget** tab, run the SQL in [`supabase/budget_debts.sql`](./supabase/budget_debts.sql) once in the Supabase **SQL Editor** so loan/debt rows sync to the cloud. Local-only users can skip this.
+
+## Supabase: expenditure sections (Fixed Costs / Nice to Have)
+
+Run [`supabase/budget_expenditures_section.sql`](./supabase/budget_expenditures_section.sql) once in the **SQL Editor** so the `section` column exists on `budget_expenditures`. Without it, signed-in users may get errors when saving expenditures after upgrading the app.
+
+## Supabase: monthly savings
+
+Run [`supabase/budget_savings.sql`](./supabase/budget_savings.sql) once in the **SQL Editor** to create the `budget_savings` table used by the Monthly Savings feature in the Budget tab. Local-only users can skip this.
+
+## Supabase: pension income tax region (England & Wales vs Scotland)
+
+Run [`supabase/pension_inputs_tax_region.sql`](./supabase/pension_inputs_tax_region.sql) once in the **SQL Editor** to add the `tax_region` column on `pension_inputs`. Without it, saving the England/Scotland toggle while signed in may fail. The app still works offline with `localStorage`.
+
+---
+
 ## Alternative: Netlify
 
 1. [app.netlify.com](https://app.netlify.com) → **Add new site** → **Import from Git**.

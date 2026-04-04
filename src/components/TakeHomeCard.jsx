@@ -39,21 +39,30 @@ export default function TakeHomeCard({ takeHome, displayPeriod = 'annual' }) {
     grossTakeHomeAnnual,
     netTakeHomeMonthly,
     netTakeHomeAnnual,
+    netTakeHomeAfterPensionAnnual,
+    netTakeHomeAfterPensionMonthly,
     estimatedIncomeTax,
     estimatedNI,
     sacrificeGross,
     personalPensionNet,
+    studentLoanRepaymentAnnual = 0,
   } = takeHome;
+
+  const hasStudentLoan = studentLoanRepaymentAnnual > 0;
 
   const isMonthly = displayPeriod === 'monthly';
   const periodLabel = isMonthly ? '/month' : '/year';
 
+  /** After tax, NI, and net pension; before Plan 4 student loan (if enriched by calculateFullPosition). */
+  const afterPensionBeforeLoan = isMonthly
+    ? (netTakeHomeAfterPensionMonthly ?? netTakeHomeMonthly)
+    : (netTakeHomeAfterPensionAnnual ?? netTakeHomeAnnual);
+
+  /** Final take-home (after pension and any student loan repayment). */
+  const afterAll = isMonthly ? netTakeHomeMonthly : netTakeHomeAnnual;
+
   // Show either the monthly or annual figure for each headline
   const beforePension = isMonthly ? grossTakeHomeMonthly : grossTakeHomeAnnual;
-  const afterPension  = isMonthly ? netTakeHomeMonthly  : netTakeHomeAnnual;
-
-  // Deductions breakdown — always annual in the source; divide for monthly display
-  const d = (annual) => fmt(isMonthly ? r2(annual / 12) : annual);
 
   const hasSacrifice       = sacrificeGross > 0;
   const hasPersonalPension = personalPensionNet > 0;
@@ -73,13 +82,19 @@ export default function TakeHomeCard({ takeHome, displayPeriod = 'annual' }) {
           <p className="text-xs text-slate-500 mt-0.5">{periodLabel}</p>
         </div>
 
-        {/* After all pension deductions */}
+        {/* After pension and optional student loan (final take-home) */}
         <div className="bg-blue-50 rounded-xl p-4">
           <p className="text-xs font-medium text-blue-600 uppercase tracking-wide mb-3">
-            After All Pension
+            {hasStudentLoan ? 'After Pension & Student Loan' : 'After All Pension'}
           </p>
-          <p className="text-2xl font-bold text-blue-700">{fmt(afterPension)}</p>
+          <p className="text-2xl font-bold text-blue-700">{fmt(hasStudentLoan ? afterAll : afterPensionBeforeLoan)}</p>
           <p className="text-xs text-blue-500 mt-0.5">{periodLabel}</p>
+          {hasStudentLoan && (
+            <p className="text-[11px] text-blue-600/80 mt-2 leading-snug">
+              After pension (before loan): {fmt(afterPensionBeforeLoan)}
+              {periodLabel}
+            </p>
+          )}
         </div>
       </div>
 
@@ -95,6 +110,13 @@ export default function TakeHomeCard({ takeHome, displayPeriod = 'annual' }) {
         )}
         {hasPersonalPension && (
           <Row label="Personal pension (net — paid from take-home)"   value={isMonthly ? r2(personalPensionNet / 12) : personalPensionNet} highlight />
+        )}
+        {hasStudentLoan && (
+          <Row
+            label="Student loan Plan 4 (from gross above threshold — post-tax deduction)"
+            value={isMonthly ? r2(studentLoanRepaymentAnnual / 12) : studentLoanRepaymentAnnual}
+            highlight
+          />
         )}
       </div>
 

@@ -1,21 +1,29 @@
 /**
  * InfoFooter — displays the current tax year and key rules being applied.
- * Data comes from TAX_RULES via props so it updates automatically each year.
  */
-import { TAX_RULES } from '../data/taxRules';
+import { TAX_RULES, getIncomeTaxRules } from '../data/taxRules';
 import { formatCurrency } from '../utils/calculations';
 
-export default function InfoFooter() {
-  const { currentYear, incomeTax, pension, dividends, savings } = TAX_RULES;
+export default function InfoFooter({ taxRegion = 'england' }) {
+  const { currentYear, pension, dividends, savings } = TAX_RULES;
+  const incomeTax = getIncomeTaxRules(taxRegion);
   const pa = incomeTax.personalAllowance;
   const aa = pension.annualAllowance.standard;
+  const isScotland = taxRegion === 'scotland';
+
+  const bands = incomeTax.bands.filter((b) => b.rate > 0);
 
   const rules = [
     { label: 'Tax year', value: currentYear },
+    { label: 'Income tax region', value: isScotland ? 'Scotland' : 'England, Wales & Northern Ireland' },
     { label: 'Personal allowance', value: formatCurrency(pa) },
-    { label: 'Basic rate (20%)', value: `${formatCurrency(pa + 1)} – ${formatCurrency(incomeTax.bands[1].max)}` },
-    { label: 'Higher rate (40%)', value: `${formatCurrency(incomeTax.bands[2].min)} – ${formatCurrency(incomeTax.bands[2].max)}` },
-    { label: 'Additional rate (45%)', value: `Above ${formatCurrency(incomeTax.bands[3].min - 1)}` },
+    ...bands.map((b) => ({
+      label: `${b.name} (${b.rate}%)`,
+      value:
+        b.max === Infinity
+          ? `Above ${formatCurrency(b.min - 1)}`
+          : `${formatCurrency(b.min)} – ${formatCurrency(b.max)}`,
+    })),
     { label: 'Pension annual allowance', value: formatCurrency(aa) },
     { label: 'Dividend allowance', value: formatCurrency(dividends.allowance) },
     { label: 'Personal savings allowance (basic rate)', value: formatCurrency(savings.personalSavingsAllowance.basicRate) },
@@ -37,7 +45,10 @@ export default function InfoFooter() {
       </div>
       <p className="text-xs text-slate-500 mt-4 leading-relaxed">
         This tool is for illustrative purposes only and does not constitute financial advice.
-        Tax rules apply to England, Wales &amp; Northern Ireland. Scotland has separate income tax bands.
+        {isScotland
+          ? ' Scottish income tax bands and rates apply to non-savings, non-dividend income. Class 1 National Insurance is UK-wide.'
+          : ' Tax bands shown apply to England, Wales & Northern Ireland. Choose Scotland above for Scottish income tax.'}
+        {' '}
         Always consult a qualified financial adviser before making pension decisions.
       </p>
     </footer>

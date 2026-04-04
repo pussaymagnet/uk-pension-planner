@@ -1,6 +1,7 @@
 /**
  * TargetCard — shows whether the 15% combined contribution target is met
- * and, for higher/additional rate payers, prompts Self Assessment relief.
+ * and, when marginal rate exceeds basic and net personal pension is paid, prompts
+ * Self Assessment relief on relief-at-source contributions.
  */
 import { formatCurrency } from '../utils/calculations';
 
@@ -12,7 +13,6 @@ export default function TargetCard({ recommendation, grossSalary }) {
     shortfallPercent,
     monthlyNetNeeded,
     eligibleForAdditionalRelief,
-    additionalReliefPercent,
     additionalReliefAnnual,
     message,
   } = recommendation;
@@ -82,13 +82,14 @@ export default function TargetCard({ recommendation, grossSalary }) {
           <div className="flex items-start gap-2">
             <span className="shrink-0">💡</span>
             <div>
-              <p className="font-semibold mb-1">Extra {additionalReliefPercent}% relief available</p>
+              <p className="font-semibold mb-1">Additional relief via Self Assessment</p>
               <p className="leading-relaxed">
-                As a higher/additional rate taxpayer you can reclaim an extra{' '}
-                <strong>{additionalReliefPercent}%</strong> on your personal contributions via your{' '}
-                <strong>Self Assessment</strong> tax return — worth approximately{' '}
-                <strong>{formatCurrency(additionalReliefAnnual)}</strong> per year based on your
-                current contribution level.
+                You pay into a net personal pension (relief at source), and some of your income
+                is taxed above the basic rate, so you may be able to claim further relief beyond
+                the 20% basic top-up on your Self Assessment tax return. Based on your salary and
+                net payments, roughly <strong>{formatCurrency(additionalReliefAnnual)}</strong> per
+                year may be claimable (the extra relief is capped to the part of the grossed-up
+                contribution that matches income above the basic rate).
               </p>
             </div>
           </div>
