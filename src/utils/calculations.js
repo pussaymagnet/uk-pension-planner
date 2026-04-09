@@ -425,9 +425,10 @@ export const calculateDynamicTaxBand = (
     region,
     share_plan_deduction_applied,
   );
+  /** Full net RAS pension to bring income to pre–higher-rate limit (from £0 PP). Not residual − ppNet, so InputForm hint stays stable while editing personal pension. */
   const remaining_needed = Math.max(
     0,
-    round2(target.required_net_pension_contribution - ppNet),
+    round2(target.required_net_pension_contribution),
   );
 
   const trace = {
@@ -822,12 +823,12 @@ export const calculateRemainingAllowance = (
 
   let warning = null;
   if (salary > 0 && usedAllowance > salary) {
-    warning = `Total contributions (${formatCurrency(usedAllowance)}) exceed 100% of salary — the maximum that qualifies for tax relief.`;
+    warning = `Total pension inputs (${formatCurrency(usedAllowance)}) are more than your full salary. For tax relief, what you and your employer pay in normally cannot be more than 100% of what you earn — check your figures.`;
   } else if (isExceeding) {
     const excess = round2(usedAllowance - effectiveMax);
-    warning = `You are exceeding the £60,000 Annual Allowance by ${formatCurrency(excess)}. A tax charge will apply on the excess at your marginal rate.`;
+    warning = `You are above the yearly pension savings limit by about ${formatCurrency(excess)}. Extra tax may apply on that part — ask an adviser or HMRC about unused allowance from past years.`;
   } else if (percentUsed >= 90) {
-    warning = `You are using ${percentUsed}% of your Annual Allowance. Consider your carry-forward entitlement before contributing further.`;
+    warning = `You are using most (${percentUsed.toFixed(0)}%) of this year’s pension savings limit. Before paying in more, check whether you can use unused amounts from earlier years.`;
   }
 
   return {
@@ -906,11 +907,11 @@ export const calculateRecommendation = (
 
   let message = '';
   if (!salary) {
-    message = 'Enter your salary to see personalised recommendations.';
+    message = 'Add your salary above to see how your pension savings compare to a simple rule of thumb.';
   } else if (meetsTarget) {
-    message = `Great — your combined contribution of ${currentTotal}% meets the ${target}% target.`;
+    message = `You’re saving about ${currentTotal}% of your pay into pensions (including what your employer adds). A common guide is at least ${target}% — you’re there.`;
   } else {
-    message = `To reach the ${target}% target, increase your contributions by approximately ${formatCurrency(monthlyNetNeeded)} per month (net).`;
+    message = `A simple guide is to aim for about ${target}% of pay into pensions in total (you + employer + any extra you pay yourself). You’re a bit short — paying about ${formatCurrency(monthlyNetNeeded)} more per month from your take-home into a personal pension would get you closer (exact amount depends on your scheme).`;
   }
 
   return {
@@ -1246,7 +1247,7 @@ export const calculateFullPosition = (
     // 15% recommendation
     recommendation,
 
-    // Employer figures (kept at top level for ContributionsCard)
+    // Employer figures (kept at top level for callers / future UI)
     employerGrossAnnual,
     employerGrossMonthly,
 

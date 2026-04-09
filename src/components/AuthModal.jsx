@@ -77,7 +77,7 @@ export default function AuthModal({ onClose }) {
             <h2 className="text-lg font-bold text-slate-900">
               {mode === 'signin' ? 'Sign in to your account' : 'Create an account'}
             </h2>
-            <p className="text-xs text-slate-500">UK Pension Planner</p>
+            <p className="text-sm text-slate-600">Save your inputs and open them on any device.</p>
           </div>
         </div>
 

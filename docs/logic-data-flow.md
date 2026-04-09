@@ -12,7 +12,7 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 **Persistence**: `localStorage` key `pension-planner-inputs`; if signed in, Supabase table `pension_inputs` (load on login, debounced upsert on change). `normalizeTaxRegion` (`src/data/taxRules.js`) forces non-`scotland` to `england`.
 
-**Important modelling note**: Income tax in `_incomeTaxAndNI` (`src/utils/calculations.js`) uses band tables from `getIncomeTaxRules` (`src/data/taxRules.js`) but **does not** apply the personal allowance taper for income above £100k (bands include a 0% personal allowance slice; no £1-per-£2 withdrawal). `TakeHomeCard` (`src/components/TakeHomeCard.jsx`) mentions possible divergence for salaries above £100k.
+**Important modelling note**: Income tax in `_incomeTaxAndNI` (`src/utils/calculations.js`) uses band tables from `getIncomeTaxRules` (`src/data/taxRules.js`) but **does not** apply the personal allowance taper for income above £100k (bands include a 0% personal allowance slice; no £1-per-£2 withdrawal). Reported take-home can therefore diverge from HMRC for salaries above £100k.
 
 ---
 
@@ -34,6 +34,7 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 1. **Annual vs monthly display**: For `grossSalary`, `personalPensionNet`, `sharePlanContribution`, and (in nominal mode) `employeeValue` / `employerValue`, `annualToDisplay` divides stored annual values by 12 when `displayPeriod === 'monthly'`. `fromDisplay` multiplies by 12 on change before calling `onChange`.
 2. **Mode toggle** (`App.jsx` `handleModeToggle`): When switching to `nominal`, `percentToNominal`: `round((pct/100) * salary)`. When switching to `percent`, `nominalToPercent`: `round((amount/salary)*10000)/100`.
+3. **Higher-band guide** (under Personal Pension when applicable): `remainingPensionNeeded` from `position.pensionBandImpact.remainingNeeded` (`calculateDynamicTaxBand`). It equals `calculateAdjustedIncomeAndPension(...).required_net_pension_contribution` — total net relief-at-source pension that would bring income to just below the pre–higher-rate limit **from a baseline of £0 personal pension**. It does **not** subtract the current personal pension input, so the figure does not jump while the user edits that field (it still updates with salary, sacrifice, and pre-tax share plan).
 
 **FORMULA**:
 
@@ -44,24 +45,24 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 ---
 
-## FEATURE: Tax band name and marginal rate badge (`TaxBandIndicator`)
+## FEATURE: Tax band panel (`PensionTaxPanel`)
 
-**SOURCE**: `position.taxBand`; optional SA note when `position.personalPension.saRelief > 0` passed as `reliefAtSourceExtraSaRelief`.
+**SOURCE**: `position.taxBand`, `position.updatedAdjustedIncome`, `position.takeHome`, `position.personalPension.saRelief`, `position.pensionBandImpact` (band before personal pension, dropped band), `position.personalPensionNet`.
 
 **FLOW**:
 
 1. `calculateFullPosition` → `calculateDynamicTaxBand`: `gross_pension = net / 0.8`; `share_plan_deduction` applies only if `sharePlanType === 'pre_tax'`; `income_before_personal_pension = gross − sacrificeGross − share_plan_deduction` (floored at 0); `adjusted_income = income_before_personal_pension − gross_pension` (floored at 0).
 2. `getTaxBand(adjusted_income, region)`: Walks `getIncomeTaxRules(region).bands` and returns `band.name` for the **adjusted** income stack (sacrifice + relief-at-source gross pension + pre-tax share plan).
-3. Static copy (rate %, summary text) keyed by band name in component (`ENGLAND_CONFIG` / `SCOTLAND_CONFIG`).
+3. UI: headline row (rate, band name, adjusted income, net take-home) on the coloured card; **More detail** expands band prose, optional pension-band note, and Self Assessment reclaim amount (`saRelief`) when that value is positive. Static copy (rate %, summary text) keyed by band name (`ENGLAND_CONFIG` / `SCOTLAND_CONFIG` in `PensionTaxPanel.jsx`).
 4. Self Assessment extra relief on personal pension — see Personal Pension feature (`calculateSelfAssessmentRelief`).
 
 **FORMULA**: **Pre-tax** share plan (e.g. SIP via salary sacrifice) reduces the same income stack as sacrifice. **Post-tax** share plan: `share_plan_deduction = 0` (no effect on taxable income in this model).
 
-**VARIABLES**: `taxBand`, `grossSalary` (hides indicator if falsy), `reliefAtSourceExtraSaRelief`.
+**VARIABLES**: `taxBand`, `grossSalary` (hides panel if falsy), `reliefAtSourceExtraSaRelief` (`saRelief` for display).
 
 ---
 
-## FEATURE: Salary sacrifice block (`ContributionsCard`)
+## FEATURE: Salary sacrifice block (`position.sacrifice`)
 
 **SOURCE**: `position.sacrifice` from `calculateSacrificeContribution` (`src/utils/calculations.js`).
 
@@ -75,13 +76,11 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 **FORMULA**: Net cost of sacrifice = gross sacrificed minus income tax and NI savings vs not sacrificing.
 
-**Display scaling**: Component divides annual figures by 12 when `displayPeriod === 'monthly'`.
-
-**VARIABLES**: `sacrifice.sacrificeGross`, `.incomeTaxSaving`, `.niSaving`, `.netCostAnnual`, `.monthlyGross`; `employeeSacrificePct` for label.
+**VARIABLES**: `sacrifice.sacrificeGross`, `.incomeTaxSaving`, `.niSaving`, `.netCostAnnual`, `.monthlyGross`; `employeeSacrificePct`.
 
 ---
 
-## FEATURE: Personal pension (relief at source) (`ContributionsCard`)
+## FEATURE: Personal pension (relief at source) (`position.personalPension`)
 
 **SOURCE**: `position.personalPension` from `calculatePersonalPensionCost` (`src/utils/calculations.js`).
 
@@ -114,7 +113,7 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 ---
 
-## FEATURE: Employer contribution (`ContributionsCard`)
+## FEATURE: Employer contribution (`position` employer gross fields)
 
 **SOURCE**: `position.employerGrossAnnual`, `position.employerGrossMonthly`, `employerPercent`.
 
@@ -124,7 +123,7 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 ---
 
-## FEATURE: Combined total into pension (`ContributionsCard`)
+## FEATURE: Combined total into pension (`position.totalGross*`, `totalCombinedPct`)
 
 **SOURCE**: `position.totalGrossAnnual`, `position.totalGrossMonthly`, `position.totalCombinedPct`.
 
@@ -134,7 +133,7 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 ---
 
-## FEATURE: Annual Allowance card (`AllowanceCard`)
+## FEATURE: Annual allowance (`position.allowance`)
 
 **SOURCE**: `position.allowance` from `calculateRemainingAllowance` (`src/utils/calculations.js`).
 
@@ -147,13 +146,11 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 **FORMULA**: Used = sacrifice gross + employer gross + personal pension gross (relief-at-source gross).
 
-**UI binding**: The breakdown line “Your contribution (gross)” uses `allowance.sacrificeGross` (salary sacrifice gross), matching the calculator return object.
-
 **VARIABLES**: `maxAllowance`, `usedAllowance`, `remainingAllowance`, `percentUsed`, `isExceeding`, `warning`, `sacrificeGross`, `employerGross`.
 
 ---
 
-## FEATURE: Contribution target (15%) (`TargetCard`)
+## FEATURE: Contribution target (15%) (`position.recommendation`)
 
 **SOURCE**: `position.recommendation` from `calculateRecommendation` (`src/utils/calculations.js`).
 
@@ -171,7 +168,7 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 ---
 
-## FEATURE: Estimated take-home pay (`TakeHomeCard`)
+## FEATURE: Estimated take-home pay (`position.takeHome`, `PensionTaxPanel`)
 
 **SOURCE**: `position.takeHome` from `calculateTakeHome` (`src/utils/calculations.js`).
 
@@ -184,14 +181,6 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 **FORMULA**: Net after all pension = take-home after tax/NI on reduced salary, minus **net** personal pension payment (salary sacrifice already embedded in tax/NI).
 
 **VARIABLES**: `estimatedIncomeTax`, `estimatedNI`, `grossTakeHomeAnnual`/`Monthly`, `netTakeHomeAnnual`/`Monthly`, `sacrificeGross`, `personalPensionNet`.
-
----
-
-## FEATURE: Tax rules footer (`InfoFooter`)
-
-**SOURCE**: `TAX_RULES` (`src/data/taxRules.js`) and `getIncomeTaxRules(taxRegion)`: `currentYear`, `personalAllowance`, positive-rate income tax bands (ranges and rates), `pension.annualAllowance.standard`, `dividends.allowance`, `savings.personalSavingsAllowance.basicRate` / `higherRate`.
-
-**FLOW**: Presentational listing of constants; `formatCurrency` (`src/utils/calculations.js`) for £ amounts.
 
 ---
 
@@ -285,7 +274,7 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
         +-- calculateTakeHome  --> netTakeHomeMonthly (Budget input)
         |
         v
-[Pension UI: ContributionsCard, AllowanceCard, TargetCard, TakeHomeCard, TaxBandIndicator, InfoFooter]
+[Pension UI: InputForm, PensionTaxPanel]
         |
         v
 [BudgetTab: netMonthlyIncome prop]
@@ -310,4 +299,5 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 | Budget defaults / row shape | `src/components/budgetConstants.js` |
 | Orchestration + `position` | `src/App.jsx` |
 | Input annual/monthly conversion | `src/components/InputForm.jsx` |
+| Tax band + headline metrics + expandable detail | `src/components/PensionTaxPanel.jsx` |
 | Budget aggregations | `src/components/BudgetTab.jsx` |

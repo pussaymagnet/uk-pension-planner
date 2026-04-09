@@ -2,16 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { calculateFullPosition, nominalToPercent, percentToNominal, STUDENT_LOAN_PLAN_4 } from './utils/calculations';
 import { normalizeTaxRegion } from './data/taxRules';
 import InputForm from './components/InputForm';
-import TaxBandIndicator from './components/TaxBandIndicator';
-import ContributionsCard from './components/ContributionsCard';
-import AllowanceCard from './components/AllowanceCard';
-import TargetCard from './components/TargetCard';
-import InfoFooter from './components/InfoFooter';
-import TakeHomeCard from './components/TakeHomeCard';
+import PensionTaxPanel from './components/PensionTaxPanel';
 import BudgetTab from './components/BudgetTab';
 import AuthModal from './components/AuthModal';
 import { useUser } from './hooks/useUser';
 import { supabase } from './lib/supabase';
+import { getLabel } from './utils/fieldLabels';
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
@@ -33,9 +29,9 @@ const STORAGE_KEY_PENSION = 'pension-planner-inputs';
 const PeriodToggle = ({ displayPeriod, onToggle }) => (
   <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50 gap-0.5">
     {[
-      { id: 'annual',  label: 'Annual'  },
-      { id: 'monthly', label: 'Monthly' },
-    ].map(({ id, label }) => (
+      { id: 'annual',  labelKey: 'display_period_annual' },
+      { id: 'monthly', labelKey: 'display_period_monthly' },
+    ].map(({ id, labelKey }) => (
       <button
         key={id}
         type="button"
@@ -45,7 +41,7 @@ const PeriodToggle = ({ displayPeriod, onToggle }) => (
             ? 'bg-white shadow-sm text-slate-900'
             : 'text-slate-500 hover:text-slate-700'}`}
       >
-        {label}
+        {getLabel(labelKey)}
       </button>
     ))}
   </div>
@@ -53,12 +49,12 @@ const PeriodToggle = ({ displayPeriod, onToggle }) => (
 
 const TaxRegionToggle = ({ taxRegion, onToggle }) => (
   <div className="flex flex-col gap-0.5">
-    <span className="text-[10px] text-slate-500 uppercase tracking-wide">Income tax</span>
+    <span className="text-xs text-slate-600">{getLabel('tax_region')}</span>
     <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50 gap-0.5">
       {[
-        { id: 'england',  label: 'England & Wales' },
-        { id: 'scotland', label: 'Scotland' },
-      ].map(({ id, label }) => (
+        { id: 'england',  labelKey: 'tax_region_england' },
+        { id: 'scotland', labelKey: 'tax_region_scotland' },
+      ].map(({ id, labelKey }) => (
         <button
           key={id}
           type="button"
@@ -68,7 +64,7 @@ const TaxRegionToggle = ({ taxRegion, onToggle }) => (
               ? 'bg-white shadow-sm text-slate-900'
               : 'text-slate-500 hover:text-slate-700'}`}
         >
-          {label}
+          {getLabel(labelKey)}
         </button>
       ))}
     </div>
@@ -262,7 +258,7 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
 
           {/* Top row: logo + title + period toggle + auth controls */}
-          <div className="flex items-center gap-3 py-4">
+          <div className="flex items-center gap-3 py-3">
             <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shrink-0">
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -272,7 +268,9 @@ export default function App() {
 
             <div>
               <h1 className="text-xl font-bold text-slate-900 leading-tight">UK Pension Planner</h1>
-              <p className="text-xs text-slate-500">{position.currentYear} tax year</p>
+              <p className="text-sm text-slate-600 mt-0.5 max-w-md">
+                See how pension savings affect your pay — in plain language. {position.currentYear} tax year.
+              </p>
             </div>
 
             {/* Right-side controls */}
@@ -280,7 +278,7 @@ export default function App() {
               {activeTab === 'pension' && (
                 <>
                   <TaxRegionToggle taxRegion={taxRegion} onToggle={setTaxRegion} />
-                  <span className="text-xs text-slate-500 hidden sm:inline">Show figures</span>
+                  <span className="text-xs text-slate-600 hidden sm:inline">{getLabel('display_period')}</span>
                   <PeriodToggle displayPeriod={displayPeriod} onToggle={setDisplayPeriod} />
                 </>
               )}
@@ -318,9 +316,9 @@ export default function App() {
           {/* Tab bar */}
           <nav className="flex gap-1 -mb-px">
             {[
-              { id: 'pension', label: 'Pension Planner' },
-              { id: 'budget',  label: 'Budget' },
-            ].map(({ id, label }) => (
+              { id: 'pension', labelKey: 'pension_tab' },
+              { id: 'budget',  labelKey: 'budget_tab' },
+            ].map(({ id, labelKey }) => (
               <button
                 key={id}
                 type="button"
@@ -330,7 +328,7 @@ export default function App() {
                     ? 'border-blue-600 text-blue-600'
                     : 'border-transparent text-slate-500 hover:text-slate-700'}`}
               >
-                {label}
+                {getLabel(labelKey)}
               </button>
             ))}
           </nav>
@@ -338,54 +336,38 @@ export default function App() {
       </header>
 
       {/* Main content */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-4 md:py-5 space-y-3 md:space-y-4">
 
         {/* Pension tab — always mounted */}
-        <div className={activeTab === 'pension' ? 'space-y-6' : 'hidden'}>
-          <InputForm
-            values={inputs}
-            onChange={handleChange}
-            contributionMode={contributionMode}
-            onModeToggle={handleModeToggle}
-            displayPeriod={displayPeriod}
-            taxRegion={taxRegion}
-          />
-          <TaxBandIndicator
-            taxBand={position.taxBand}
-            grossSalary={position.grossSalary}
-            taxRegion={taxRegion}
-            reliefAtSourceExtraSaRelief={position.personalPension.saRelief}
-            taxBandBeforePersonalPension={position.pensionBandImpact?.taxBandBeforePersonalPension}
-            hasDroppedTaxBand={position.pensionBandImpact?.hasDroppedTaxBand}
-            personalPensionNet={position.personalPensionNet}
-          />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <ContributionsCard
-              sacrifice={position.sacrifice}
-              personalPension={position.personalPension}
-              employerGrossAnnual={position.employerGrossAnnual}
-              employerGrossMonthly={position.employerGrossMonthly}
-              totalGrossAnnual={position.totalGrossAnnual}
-              totalGrossMonthly={position.totalGrossMonthly}
-              totalCombinedPct={position.totalCombinedPct}
-              employeeSacrificePct={position.employeeSacrificePct}
-              employerPercent={position.employerPercent}
-              displayPeriod={displayPeriod}
-              grossSalary={position.grossSalary}
-              salarySacrificeGross={position.sacrifice?.sacrificeGross ?? 0}
-              taxRegion={taxRegion}
-              personalPensionNet={position.personalPensionNet}
-              remainingPensionNeeded={position.pensionBandImpact?.remainingNeeded ?? 0}
-              sharePlanDeductionApplied={position.sharePlanDeductionApplied ?? 0}
-            />
-            <AllowanceCard allowance={position.allowance} />
-            <TargetCard
-              recommendation={position.recommendation}
-              grossSalary={position.grossSalary}
-            />
-            <TakeHomeCard takeHome={position.takeHome} displayPeriod={displayPeriod} />
+        <div className={activeTab === 'pension' ? 'space-y-3 md:space-y-4' : 'hidden'}>
+          <div className="lg:grid lg:grid-cols-12 lg:gap-4 lg:items-start">
+            <div className="lg:col-span-7 min-w-0">
+              <InputForm
+                values={inputs}
+                onChange={handleChange}
+                contributionMode={contributionMode}
+                onModeToggle={handleModeToggle}
+                displayPeriod={displayPeriod}
+                taxRegion={taxRegion}
+                grossSalary={position.grossSalary}
+                remainingPensionNeeded={position.pensionBandImpact?.remainingNeeded ?? 0}
+              />
+            </div>
+            <div className="mt-3 space-y-3 lg:mt-0 lg:col-span-5 lg:sticky lg:top-4 lg:self-start">
+              <PensionTaxPanel
+                taxBand={position.taxBand}
+                updatedAdjustedIncome={position.updatedAdjustedIncome}
+                takeHome={position.takeHome}
+                displayPeriod={displayPeriod}
+                grossSalary={position.grossSalary}
+                taxRegion={taxRegion}
+                reliefAtSourceExtraSaRelief={position.personalPension.saRelief}
+                taxBandBeforePersonalPension={position.pensionBandImpact?.taxBandBeforePersonalPension}
+                hasDroppedTaxBand={position.pensionBandImpact?.hasDroppedTaxBand}
+                personalPensionNet={position.personalPensionNet}
+              />
+            </div>
           </div>
-          <InfoFooter taxRegion={taxRegion} />
         </div>
 
         {/* Budget tab — always mounted */}

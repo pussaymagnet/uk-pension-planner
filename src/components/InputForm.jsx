@@ -1,14 +1,10 @@
+import { formatCurrency } from '../utils/calculations';
+import { getFieldLabel, getLabel, periodSlashSuffix } from '../utils/fieldLabels';
+
 /**
  * InputForm — controlled inputs for all financial details.
  *
- * Contribution types modelled:
- *  - Salary sacrifice (employee + employer): before income tax and NI.
- *    Mode toggle lets user enter these as % of salary or flat £ per year.
- *  - Personal pension (SIPP / relief at source): always entered as the
- *    net annual £ amount the employee physically pays; HMRC adds 20%.
- *
- * displayPeriod (annual | monthly) matches ContributionsCard: stored values
- * remain annual; in monthly mode £ fields show/edit monthly equivalents.
+ * displayPeriod (annual | monthly): stored values annual; monthly mode shows monthly £.
  */
 
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -40,12 +36,20 @@ function fromDisplay(field, raw, isMonthly, contributionMode) {
   return String(r2(m * 12));
 }
 
-const InputField = ({ label, hint, prefix, suffix, value, onChange, min = 0, max, step = 1 }) => (
+const InputField = ({
+  label,
+  prefix,
+  suffix,
+  value,
+  onChange,
+  min = 0,
+  max,
+  step = 1,
+}) => (
   <div>
-    <label className="block text-sm font-medium text-slate-700 mb-1">
-      {label}
-      {hint && <span className="ml-1 text-slate-400 font-normal text-xs">({hint})</span>}
-    </label>
+    <div className="flex items-start justify-between gap-2 mb-0.5">
+      <label className="text-sm font-semibold text-slate-800 flex-1 min-w-0">{label}</label>
+    </div>
     <div className="relative flex items-center">
       {prefix && (
         <span className="absolute left-3 text-slate-500 text-sm font-medium select-none">{prefix}</span>
@@ -58,7 +62,7 @@ const InputField = ({ label, hint, prefix, suffix, value, onChange, min = 0, max
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className={`
-          w-full rounded-lg border border-slate-300 bg-white py-2.5 text-sm text-slate-900
+          w-full rounded-lg border border-slate-300 bg-white py-2 min-h-[2.5rem] text-base text-slate-900
           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500
           transition-colors
           ${prefix ? 'pl-7 pr-3' : suffix ? 'pl-3 pr-8' : 'px-3'}
@@ -75,9 +79,9 @@ const InputField = ({ label, hint, prefix, suffix, value, onChange, min = 0, max
 const ModeToggle = ({ contributionMode, onModeToggle }) => (
   <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50 gap-0.5">
     {[
-      { id: 'percent', label: '% of salary' },
-      { id: 'nominal', label: '£ amount'    },
-    ].map(({ id, label }) => (
+      { id: 'percent', labelKey: 'contribution_mode_percent' },
+      { id: 'nominal', labelKey: 'contribution_mode_nominal' },
+    ].map(({ id, labelKey }) => (
       <button
         key={id}
         type="button"
@@ -87,7 +91,7 @@ const ModeToggle = ({ contributionMode, onModeToggle }) => (
             ? 'bg-white shadow-sm text-slate-900'
             : 'text-slate-500 hover:text-slate-700'}`}
       >
-        {label}
+        {getLabel(labelKey)}
       </button>
     ))}
   </div>
@@ -100,54 +104,52 @@ export default function InputForm({
   onModeToggle,
   displayPeriod = 'annual',
   taxRegion = 'england',
+  grossSalary = 0,
+  remainingPensionNeeded = 0,
 }) {
   const isMonthly = displayPeriod === 'monthly';
+
+  const showHigherBandHint =
+    Number(grossSalary) > 0 && Number(remainingPensionNeeded) > 0;
+  const hintDisplayAmount = showHigherBandHint
+    ? formatCurrency(isMonthly ? r2(remainingPensionNeeded / 12) : remainingPensionNeeded)
+    : '';
 
   const handleFieldChange = (field) => (val) => {
     onChange(field, fromDisplay(field, val, isMonthly, contributionMode));
   };
 
-  // Salary sacrifice fields (employee + employer) follow the mode toggle
   const isPercent = contributionMode === 'percent';
   const sacrificeProps = isPercent
-    ? { suffix: '%', prefix: undefined, max: 100, step: 0.5, hint: '% of salary — before tax & NI' }
+    ? { suffix: '%', prefix: undefined, max: 100, step: 0.5 }
     : {
         prefix: '£',
         suffix: undefined,
         max: isMonthly ? Math.ceil(10000000 / 12) : 10000000,
         step: isMonthly ? 50 : 100,
-        hint: isMonthly
-          ? 'monthly gross £ — before tax & NI'
-          : 'annual gross £ — before tax & NI',
       };
 
-  const grossLabel = isMonthly ? 'Gross Monthly Salary' : 'Gross Annual Salary';
-  const grossHint = isMonthly ? 'before tax, per month' : 'before tax';
   const grossMax = isMonthly ? Math.ceil(10000000 / 12) : 10000000;
   const grossStep = isMonthly ? 100 : 1000;
 
-  const personalHint = isMonthly
-    ? 'net monthly £ you pay — HMRC adds 20%'
-    : 'net annual £ you pay — HMRC adds 20%';
   const personalMax = isMonthly ? Math.ceil(10000000 / 12) : 10000000;
   const personalStep = isMonthly ? 50 : 100;
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-      {/* Header row */}
-      <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-        <h2 className="text-lg font-semibold text-slate-900">Your Details</h2>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500 whitespace-nowrap">Salary sacrifice in</span>
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+      <div className="flex items-start justify-between mb-3 gap-3 flex-wrap">
+        <h2 className="text-base font-semibold text-slate-900">{getLabel('pension_inputs')}</h2>
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 whitespace-nowrap">{getLabel('contribution_mode')}</span>
+          </div>
           <ModeToggle contributionMode={contributionMode} onModeToggle={onModeToggle} />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* Gross salary */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <InputField
-          label={grossLabel}
-          hint={grossHint}
+          label={getFieldLabel('grossSalary')}
           prefix="£"
           value={annualToDisplay(values.grossSalary, 'grossSalary', isMonthly, contributionMode)}
           onChange={handleFieldChange('grossSalary')}
@@ -156,10 +158,8 @@ export default function InputForm({
           step={grossStep}
         />
 
-        {/* Salary sacrifice — employee */}
         <InputField
-          label="Your Salary Sacrifice"
-          hint={sacrificeProps.hint}
+          label={getFieldLabel('employeeValue')}
           prefix={sacrificeProps.prefix}
           suffix={sacrificeProps.suffix}
           value={annualToDisplay(values.employeeValue, 'employeeValue', isMonthly, contributionMode)}
@@ -169,10 +169,8 @@ export default function InputForm({
           step={sacrificeProps.step}
         />
 
-        {/* Salary sacrifice — employer match */}
         <InputField
-          label="Employer Pension Contribution"
-          hint={sacrificeProps.hint}
+          label={getFieldLabel('employerValue')}
           prefix={sacrificeProps.prefix}
           suffix={sacrificeProps.suffix}
           value={annualToDisplay(values.employerValue, 'employerValue', isMonthly, contributionMode)}
@@ -182,10 +180,8 @@ export default function InputForm({
           step={sacrificeProps.step}
         />
 
-        {/* Personal pension (SIPP) — always net £ */}
         <InputField
-          label="Personal Pension Contribution"
-          hint={personalHint}
+          label={getFieldLabel('personalPensionNet')}
           prefix="£"
           value={annualToDisplay(values.personalPensionNet, 'personalPensionNet', isMonthly, contributionMode)}
           onChange={handleFieldChange('personalPensionNet')}
@@ -194,54 +190,54 @@ export default function InputForm({
           step={personalStep}
         />
 
-        <div className="sm:col-span-2">
-          <label className="block text-sm font-medium text-slate-700 mb-1">
-            Share plan (company shares / SIP)
-            <span className="ml-1 text-slate-400 font-normal text-xs">
-              (annual £ invested — pre-tax reduces taxable income; post-tax does not)
-            </span>
-          </label>
-          <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-            <div className="relative flex-1">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm font-medium select-none">
-                £
-              </span>
-              <input
-                type="number"
-                min={0}
-                max={personalMax}
-                step={personalStep}
-                value={annualToDisplay(
-                  values.sharePlanContribution,
-                  'sharePlanContribution',
-                  isMonthly,
-                  contributionMode,
-                )}
-                onChange={(e) => handleFieldChange('sharePlanContribution')(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-7 pr-3 text-sm text-slate-900
-                  focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                placeholder="0"
-              />
-            </div>
-            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50 gap-0.5 shrink-0">
-              {[
-                { id: 'post_tax', label: 'Post-tax' },
-                { id: 'pre_tax', label: 'Pre-tax' },
-              ].map(({ id, label }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => onChange('sharePlanType', id)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all
-                    ${(values.sharePlanType || 'post_tax') === id
-                      ? 'bg-white shadow-sm text-slate-900'
-                      : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                  {label}
-                </button>
-              ))}
+        <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+          <div className="space-y-2 min-w-0">
+            <InputField
+              label={getFieldLabel('sharePlanContribution')}
+              prefix="£"
+              value={annualToDisplay(
+                values.sharePlanContribution,
+                'sharePlanContribution',
+                isMonthly,
+                contributionMode,
+              )}
+              onChange={handleFieldChange('sharePlanContribution')}
+              min={0}
+              max={personalMax}
+              step={personalStep}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-slate-800">{getLabel('share_plan_type')}</span>
+              <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50 gap-0.5 shrink-0">
+                {[
+                  { id: 'post_tax', labelKey: 'share_plan_type_post_tax' },
+                  { id: 'pre_tax', labelKey: 'share_plan_type_pre_tax' },
+                ].map(({ id, labelKey }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => onChange('sharePlanType', id)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all
+                      ${(values.sharePlanType || 'post_tax') === id
+                        ? 'bg-white shadow-sm text-slate-900'
+                        : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    {getLabel(labelKey)}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
+          {showHigherBandHint && (
+            <div
+              className="rounded-lg border border-slate-200 bg-slate-50/80 text-slate-800 px-3 py-2.5 text-sm sm:mt-0"
+              role="status"
+            >
+              <span className="text-slate-600">{getLabel('remaining_needed')}</span>{' '}
+              <span className="tabular-nums font-semibold text-blue-800">{hintDisplayAmount}</span>{' '}
+              <span className="text-slate-500">{periodSlashSuffix(displayPeriod)}</span>
+            </div>
+          )}
         </div>
 
         {taxRegion === 'scotland' && (
@@ -253,15 +249,7 @@ export default function InputForm({
                 onChange={(e) => onChange('studentLoanPlan', e.target.checked ? 'plan_4' : '')}
                 className="mt-1 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
               />
-              <span>
-                <span className="block text-sm font-medium text-slate-700">
-                  Student Loan Plan 4 (Scotland)
-                </span>
-                <span className="block text-xs text-slate-500 mt-0.5">
-                  Repayment is calculated on gross income above the Plan 4 threshold and deducted from
-                  take-home after tax — it does not reduce taxable income.
-                </span>
-              </span>
+              <span className="text-sm font-semibold text-slate-800">{getLabel('student_loan_plan_plan_4')}</span>
             </label>
           </div>
         )}

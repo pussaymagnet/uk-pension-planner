@@ -627,9 +627,10 @@ export default function BudgetTab({ netMonthlyIncome = 0, user = null }) {
       {/* Page heading */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Household Budget</h2>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Track bills, loan repayments, and see what you have left each month.
+          <h2 className="text-2xl font-bold text-slate-900">Household budget</h2>
+          <p className="text-sm text-slate-600 mt-0.5 leading-relaxed max-w-xl">
+            List regular bills and borrowing so you can see what’s left after essentials. Works with the monthly
+            pay figure from the Pension &amp; pay tab.
           </p>
         </div>
         {/* Sync indicator */}
