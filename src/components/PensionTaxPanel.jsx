@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { formatCurrency } from '../utils/calculations';
 import { getLabel, periodSlashSuffix } from '../utils/fieldLabels';
 
@@ -42,20 +42,20 @@ const SCOTLAND_CONFIG = {
     dot: 'bg-sky-500',
     rate: '19%',
     summary:
-      'Part of your pay is taxed at 19% — Scotland uses several bands; this is the first one above the tax-free amount.',
+      'Part of your pay is taxed at 19% — the first band above the tax-free amount.',
   },
   'Scottish Basic Rate': {
     colour: 'bg-blue-50 border-blue-300 text-blue-800',
     dot: 'bg-blue-500',
     rate: '20%',
-    summary: 'Some of your pay is taxed at 20% (Scottish “basic” band).',
+    summary: 'Some of your pay is taxed at 20% — the “basic” band.',
   },
   'Intermediate Rate': {
     colour: 'bg-indigo-50 border-indigo-300 text-indigo-900',
     dot: 'bg-indigo-500',
     rate: '21%',
     summary:
-      'Some of your pay is taxed at 21% — Scottish income tax has extra bands compared with England.',
+      'Some of your pay is taxed at 21%.',
   },
   'Scottish Higher Rate': {
     colour: 'bg-amber-50 border-amber-300 text-amber-800',
@@ -73,7 +73,7 @@ const SCOTLAND_CONFIG = {
     colour: 'bg-red-50 border-red-300 text-red-800',
     dot: 'bg-red-500',
     rate: '48%',
-    summary: 'Some of your pay is taxed at 48% — the highest Scottish rate on earnings.',
+    summary: 'Some of your pay is taxed at 48% — the highest rate on earnings.',
   },
 };
 
@@ -92,9 +92,33 @@ export default function PensionTaxPanel({
   taxBandBeforePersonalPension,
   hasDroppedTaxBand = false,
   personalPensionNet = 0,
+  allowance = null,
 }) {
   const [expanded, setExpanded] = useState(false);
   const detailsId = useId();
+  const aaHelpId = useId();
+  const helpPanelId = `aa-help-${aaHelpId.replace(/:/g, '')}`;
+  const helpTriggerId = `aa-tr-${aaHelpId.replace(/:/g, '')}`;
+  const [aaHelpOpen, setAaHelpOpen] = useState(false);
+  const aaHelpWrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!aaHelpOpen) return;
+    const onDoc = (e) => {
+      if (aaHelpWrapRef.current && !aaHelpWrapRef.current.contains(e.target)) {
+        setAaHelpOpen(false);
+      }
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') setAaHelpOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [aaHelpOpen]);
 
   if (!Number(grossSalary)) return null;
   if (!takeHome) return null;
@@ -129,6 +153,13 @@ export default function PensionTaxPanel({
   const showPensionNote =
     ppNet > 0 && taxBandBeforePersonalPension != null && taxBandBeforePersonalPension !== taxBand;
 
+  const maxAA = allowance != null ? Number(allowance.maxAllowance) || 0 : 0;
+  const usedAA = allowance != null ? Number(allowance.usedAllowance) || 0 : 0;
+  const remainingAA = allowance != null ? Number(allowance.remainingAllowance) || 0 : 0;
+  const pctUsed =
+    allowance != null ? Math.min(100, Number(allowance.percentUsed) || 0) : 0;
+  const aaExceeding = Boolean(allowance?.isExceeding);
+
   return (
     <div className={`rounded-2xl border-2 p-4 ${cfg.colour}`}>
       <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-2 text-sm">
@@ -160,6 +191,78 @@ export default function PensionTaxPanel({
           <span className="ml-0.5 text-xs text-slate-500">{period}</span>
         </div>
       </div>
+
+      {allowance != null && maxAA > 0 && (
+        <div ref={aaHelpWrapRef} className="relative mb-3">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-slate-700">
+              {getLabel('annual_allowance_section')}
+            </span>
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                id={helpTriggerId}
+                aria-expanded={aaHelpOpen}
+                aria-controls={helpPanelId}
+                aria-label={getLabel('annual_allowance_help')}
+                className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-slate-500/40 text-[10px] font-bold leading-none text-slate-600 hover:bg-black/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                onClick={() => setAaHelpOpen((o) => !o)}
+              >
+                ?
+              </button>
+              {aaHelpOpen && (
+                <div
+                  id={helpPanelId}
+                  role="dialog"
+                  aria-label={getLabel('annual_allowance_help')}
+                  className="absolute right-0 top-full z-20 mt-1 max-w-[min(20rem,calc(100vw-2rem))] rounded-lg border border-slate-200 bg-white p-3 text-left text-xs leading-relaxed text-slate-700 shadow-lg"
+                >
+                  {getLabel('annual_allowance_popover')}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="mb-1 grid grid-cols-[1fr_auto_1fr] items-center gap-x-2 text-xs text-slate-600">
+            <span className="min-w-0 tabular-nums">
+              {getLabel('annual_allowance_used')}{' '}
+              <span className="font-semibold text-slate-900">
+                {formatCurrency(r2(usedAA))}
+              </span>
+            </span>
+            <span className="shrink-0 text-slate-400" aria-hidden>
+              →
+            </span>
+            <span className="min-w-0 text-right tabular-nums">
+              {getLabel('annual_allowance_remaining')}{' '}
+              <span className="font-semibold text-slate-900">
+                {formatCurrency(r2(remainingAA))}
+              </span>
+            </span>
+          </div>
+          <div
+            className="h-2.5 w-full overflow-hidden rounded-full bg-black/10"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(pctUsed)}
+            aria-label={`${getLabel('annual_allowance_cap')}: ${formatCurrency(r2(maxAA))}, ${getLabel('annual_allowance_used')} ${formatCurrency(r2(usedAA))}`}
+          >
+            <div
+              className={`h-full rounded-full transition-[width] duration-300 ${
+                aaExceeding ? 'bg-red-600' : 'bg-slate-700'
+              }`}
+              style={{ width: `${aaExceeding ? 100 : pctUsed}%` }}
+            />
+          </div>
+          <div className="mt-1 flex justify-between text-[10px] tabular-nums text-slate-500">
+            <span>£0</span>
+            <span>
+              {getLabel('annual_allowance_cap')}{' '}
+              {formatCurrency(r2(maxAA))}
+            </span>
+          </div>
+        </div>
+      )}
 
       <button
         type="button"

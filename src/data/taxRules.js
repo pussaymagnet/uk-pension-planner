@@ -97,7 +97,8 @@ export const TAX_RULES = {
       higherRate:     500,
       additionalRate: 0,
     },
-    startingRateForSavings: 5000, // 0% on first £5,000 savings if non-savings income < £17,570
+    // 0% on savings in the starting-rate band only if non-savings taxable income is below £5,000
+    startingRateForSavings: 5000,
     startingRate: 0,
   },
 
@@ -140,6 +141,22 @@ export const TAX_RULES = {
     "2021/22": { annualAllowance: 40000, personalAllowance: 12570 },
   },
 };
+
+/**
+ * Personal allowance with taper for adjusted net income above £100,000.
+ * £1 reduction for every £2 of ANI above the threshold; zero by £125,140.
+ * @param {number} adjustedNetIncome
+ * @returns {number} Personal allowance in £ (0–12,570)
+ */
+export function getPersonalAllowance(adjustedNetIncome) {
+  const income = Math.max(0, Number(adjustedNetIncome) || 0);
+  const { personalAllowance: maxPa, personalAllowanceTaperStart: start, personalAllowanceTaperEnd: end } =
+    TAX_RULES.incomeTax;
+  if (income <= start) return maxPa;
+  if (income >= end) return 0;
+  const reduction = (income - start) / 2;
+  return Math.max(0, Math.round((maxPa - reduction) * 100) / 100);
+}
 
 /** @param {'england' | 'scotland'} taxRegion */
 export function getIncomeTaxRules(taxRegion) {

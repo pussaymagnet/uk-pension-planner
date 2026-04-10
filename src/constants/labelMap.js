@@ -45,4 +45,11 @@ export const labelMap = {
 
   // ─── PensionTaxPanel extra copy ────────────────────────────────────────────
   self_assessment_relief: 'Self assessment relief',
+  annual_allowance_cap: 'Annual allowance cap',
+  annual_allowance_section: 'Annual allowance',
+  annual_allowance_help: 'About annual allowance',
+  annual_allowance_popover:
+    'This bar shows how much of your pension annual allowance is used this tax year. We add salary sacrifice, employer contributions, and your personal pension (grossed up from the net you pay in). The cap is the lower of £60,000 and your gross salary. Remaining is what is left under that cap. This app does not model allowance taper for high earners or carry-forward from earlier years.',
+  annual_allowance_used: 'Used',
+  annual_allowance_remaining: 'Remaining',
 };

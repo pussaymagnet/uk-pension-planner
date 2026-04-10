@@ -1,8 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
-import { calculateFullPosition, nominalToPercent, percentToNominal, STUDENT_LOAN_PLAN_4 } from './utils/calculations';
+import {
+  calculateFullPosition,
+  getPensionBenefitBreakdown,
+  nominalToPercent,
+  percentToNominal,
+  STUDENT_LOAN_PLAN_4,
+} from './utils/calculations';
+import { buildPensionBenefitChartData } from './utils/pensionBenefitChart';
+import { buildPensionValueStackedChartData } from './utils/pensionValueStackedChart';
 import { normalizeTaxRegion } from './data/taxRules';
 import InputForm from './components/InputForm';
 import PensionTaxPanel from './components/PensionTaxPanel';
+import PensionBenefitBarChart from './components/PensionBenefitBarChart';
+import PensionValueStackedBarChart from './components/PensionValueStackedBarChart';
 import BudgetTab from './components/BudgetTab';
 import AuthModal from './components/AuthModal';
 import { useUser } from './hooks/useUser';
@@ -232,6 +242,13 @@ export default function App() {
     inputs.studentLoanPlan === STUDENT_LOAN_PLAN_4 ? STUDENT_LOAN_PLAN_4 : null,
   );
 
+  const pensionBenefit = getPensionBenefitBreakdown(position);
+  const pensionBenefitChartData = buildPensionBenefitChartData(pensionBenefit.breakdown);
+  const pensionValueStacked = buildPensionValueStackedChartData(
+    position,
+    pensionBenefit.breakdown,
+  );
+
   const netMonthlyIncome = position.takeHome?.netTakeHomeMonthly ?? 0;
 
   // ── Sign out ──────────────────────────────────────────────────────────────
@@ -365,7 +382,27 @@ export default function App() {
                 taxBandBeforePersonalPension={position.pensionBandImpact?.taxBandBeforePersonalPension}
                 hasDroppedTaxBand={position.pensionBandImpact?.hasDroppedTaxBand}
                 personalPensionNet={position.personalPensionNet}
+                allowance={position.allowance}
               />
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <PensionValueStackedBarChart
+                  summary={pensionValueStacked.summary}
+                  detailed={pensionValueStacked.detailed}
+                />
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <PensionBenefitBarChart data={pensionBenefitChartData} />
+              </div>
+              <details>
+                <summary>Pension benefit breakdown (audit)</summary>
+                <pre>
+                  {JSON.stringify(
+                    { breakdown: pensionBenefit.breakdown, trace: pensionBenefit.trace },
+                    null,
+                    2,
+                  )}
+                </pre>
+              </details>
             </div>
           </div>
         </div>

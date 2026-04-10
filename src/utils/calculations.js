@@ -11,7 +11,7 @@
  *                       extra via Self Assessment.
  */
 
-import { TAX_RULES, getIncomeTaxRules, normalizeTaxRegion } from '../data/taxRules';
+import { TAX_RULES, getIncomeTaxRules, normalizeTaxRegion, getPersonalAllowance } from '../data/taxRules';
 
 /** Scottish Student Loan Plan 4 — must match {@link calculateStudentLoanRepayment} eligibility */
 export const STUDENT_LOAN_PLAN_4 = 'plan_4';
@@ -169,29 +169,85 @@ export const formatCurrency = (amount, decimals = 0) =>
 // Private helper: income tax + NI on any salary figure
 // ----------------------------------------------------------------
 /**
- * Returns [incomeTax, ni] for a given salary using TAX_RULES.
- * Used internally for salary-sacrifice "difference" calculations.
- * @param {number} salary
- * @returns {[number, number]}
+ * England / Wales / NI: income tax on taxable income after personal allowance (with taper).
+ * Uses basic-rate width 20% → 40% → 45% slabs aligned with HMRC.
+ *
+ * @param {number} grossAnnual Gross employment income (same basis as PAYE)
+ * @param {number} adjustedNetIncome For PA taper only (£1 per £2 between £100k–£125,140); defaults to gross when omitted
  */
-const _incomeTaxAndNI = (salary, taxRegion = 'england') => {
-  const region = normalizeTaxRegion(taxRegion);
-  const { bands } = getIncomeTaxRules(region);
-  let incomeTax = 0;
+const computeIncomeTaxEnglandWales = (grossAnnual, adjustedNetIncome) => {
+  const gross = Math.max(0, Number(grossAnnual) || 0);
+  const aniRaw = Number(adjustedNetIncome);
+  const pa = getPersonalAllowance(Number.isFinite(aniRaw) ? aniRaw : gross);
+  const taxable = Math.max(0, round2(gross - pa));
+  const brw = TAX_RULES.incomeTax.basicRateBandWidth;
+  const additionalThresholdGross = 125140;
+  let rem = taxable;
+  let tax = 0;
+  const chunk20 = Math.min(rem, brw);
+  tax += chunk20 * 0.2;
+  rem -= chunk20;
+  const max40 = Math.max(0, additionalThresholdGross - pa - brw);
+  const chunk40 = Math.min(rem, max40);
+  tax += chunk40 * 0.4;
+  rem -= chunk40;
+  tax += rem * 0.45;
+  return round2(tax);
+};
+
+/**
+ * Scotland: gross income bands from {@link TAX_RULES.incomeTaxScotland.bands} intersected with
+ * income above the (possibly tapered) personal allowance. Matches the statutory gross band table.
+ */
+const computeIncomeTaxScotland = (grossAnnual, adjustedNetIncome) => {
+  const gross = Math.max(0, Number(grossAnnual) || 0);
+  const aniRaw = Number(adjustedNetIncome);
+  const pa = getPersonalAllowance(Number.isFinite(aniRaw) ? aniRaw : gross);
+  const { bands } = TAX_RULES.incomeTaxScotland;
+  let tax = 0;
   for (const band of bands) {
-    if (salary > band.min - 1 && band.rate > 0) {
-      const taxableInBand = Math.min(salary, band.max) - (band.min - 1);
-      incomeTax += (taxableInBand * band.rate) / 100;
+    if (band.rate <= 0) continue;
+    const low = Math.max(band.min, pa + 1);
+    const high = Math.min(gross, band.max);
+    if (high >= low) {
+      tax += (high - low + 1) * (band.rate / 100);
     }
   }
+  return round2(tax);
+};
+
+/**
+ * Returns [incomeTax, ni] for a given salary using TAX_RULES.
+ * Used internally for salary-sacrifice "difference" calculations.
+ *
+ * Income tax includes **personal allowance taper** when `adjustedNetIncomeForPA` is supplied;
+ * otherwise ANI is assumed equal to `salary` (typical for employment-only estimates).
+ * Does not model gift aid / gross pension in ANI — pass a computed ANI if you need that.
+ *
+ * @param {number} salary
+ * @param {string} [taxRegion]
+ * @param {number | null} [adjustedNetIncomeForPA] Adjusted net income for PA taper (see HMRC)
+ * @returns {[number, number]}
+ */
+const _incomeTaxAndNI = (salary, taxRegion = 'england', adjustedNetIncomeForPA = null) => {
+  const region = normalizeTaxRegion(taxRegion);
+  const gross = Number(salary) || 0;
+  const ani = adjustedNetIncomeForPA != null && Number.isFinite(Number(adjustedNetIncomeForPA))
+    ? Number(adjustedNetIncomeForPA)
+    : gross;
+
+  const incomeTax =
+    region === 'scotland'
+      ? computeIncomeTaxScotland(gross, ani)
+      : computeIncomeTaxEnglandWales(gross, ani);
 
   // Class 1 primary NI
   const { primaryThreshold: pt, upperEarningsLimit: uel,
     mainRate, upperRate } = TAX_RULES.nationalInsurance;
   let ni = 0;
-  if (salary > pt) {
-    ni += (Math.min(salary, uel) - pt) * mainRate / 100;
-    if (salary > uel) ni += (salary - uel) * upperRate / 100;
+  if (gross > pt) {
+    ni += (Math.min(gross, uel) - pt) * mainRate / 100;
+    if (gross > uel) ni += (gross - uel) * upperRate / 100;
   }
 
   return [round2(incomeTax), round2(ni)];
@@ -267,8 +323,8 @@ export const getPreHigherRateIncomeLimit = (taxRegion = 'england') => {
 
 /**
  * Adjusted income (gross minus pre-tax salary sacrifice) and the net relief-at-source
- * personal pension payment that would bring income to just below the higher-rate threshold
- * (same income stack as {@link getTaxBand}; no PA taper for £100k–£125k).
+ * personal pension payment that would bring income to just below the higher-rate threshold.
+ * {@link getTaxBand} labels do not reflect PA taper; income tax on salary uses taper via {@link getPersonalAllowance}.
  *
  * Required net contribution uses {@link TAX_RULES.pension.taxRelief.reliefAtSourceMultiplier}
  * (0.8): net paid is 80% of the gross income reduction because basic-rate relief at source
@@ -939,7 +995,7 @@ export const calculateRecommendation = (
  * NI (e.g. via PAYE) and act like a post-tax deduction — only net take-home is reduced.
  *
  * @param {object} params
- * @param {number} params.grossIncome Annual gross employment income (£) — same basis as salary input
+ * @param {number} params.studentLoanIncome Income for Plan 4 repayment: contract gross **minus** salary sacrifice only (PAYE gross). Excludes relief-at-source personal pension.
  * @param {'england' | 'scotland'} params.taxRegion
  * @param {string | null | undefined} params.studentLoanPlan e.g. {@link STUDENT_LOAN_PLAN_4} or null
  * @returns {{
@@ -951,12 +1007,12 @@ export const calculateRecommendation = (
  * }}
  */
 export const calculateStudentLoanRepayment = ({
-  grossIncome,
+  studentLoanIncome,
   taxRegion,
   studentLoanPlan,
 }) => {
   const region = normalizeTaxRegion(taxRegion);
-  const gross = Math.max(0, round2(Number(grossIncome) || 0));
+  const slo = Math.max(0, round2(Number(studentLoanIncome) || 0));
   const planRaw = studentLoanPlan == null || studentLoanPlan === '' ? null : String(studentLoanPlan);
   const plan = planRaw === STUDENT_LOAN_PLAN_4 ? STUDENT_LOAN_PLAN_4 : null;
 
@@ -969,13 +1025,13 @@ export const calculateStudentLoanRepayment = ({
   let student_loan_repayment = 0;
 
   if (eligible) {
-    repayable_income = Math.max(0, round2(gross - threshold));
+    repayable_income = Math.max(0, round2(slo - threshold));
     student_loan_repayment = round2(repayable_income * rate);
   }
 
   const trace = {
     inputs: {
-      gross_income: gross,
+      student_loan_income: slo,
       student_loan_plan: planRaw,
       tax_region: region,
     },
@@ -990,7 +1046,7 @@ export const calculateStudentLoanRepayment = ({
       {
         id: 2,
         label: 'Repayable income',
-        detail: `max(0, gross_income − threshold £${threshold.toLocaleString('en-GB')})`,
+        detail: `max(0, student_loan_income − threshold £${threshold.toLocaleString('en-GB')})`,
         value: repayable_income,
       },
       {
@@ -1017,7 +1073,7 @@ export const calculateStudentLoanRepayment = ({
  *
  * @param {object} params
  * @param {number} params.netIncomeBeforeStudentLoan Annual £ after tax, NI, and net personal pension
- * @param {number} params.grossIncome Annual gross — for Plan 4 repayment band only
+ * @param {number} params.studentLoanIncome Contract gross minus salary sacrifice only — Plan 4 repayment band (excludes RAS pension)
  * @param {'england' | 'scotland'} params.taxRegion
  * @param {string | null | undefined} params.studentLoanPlan
  * @returns {{
@@ -1032,17 +1088,17 @@ export const calculateStudentLoanRepayment = ({
  */
 export const calculateNetIncome = ({
   netIncomeBeforeStudentLoan,
-  grossIncome,
+  studentLoanIncome,
   taxRegion,
   studentLoanPlan,
 }) => {
   const before = Math.max(0, round2(Number(netIncomeBeforeStudentLoan) || 0));
-  const sl = calculateStudentLoanRepayment({ grossIncome, taxRegion, studentLoanPlan });
+  const sl = calculateStudentLoanRepayment({ studentLoanIncome, taxRegion, studentLoanPlan });
   const net_income_after_student_loan = Math.max(0, round2(before - sl.student_loan_repayment));
 
   const trace = {
     inputs: {
-      gross_income: Number(grossIncome) || 0,
+      student_loan_income: Number(studentLoanIncome) || 0,
       student_loan_plan: studentLoanPlan == null || studentLoanPlan === '' ? null : String(studentLoanPlan),
     },
     steps: [
@@ -1181,7 +1237,7 @@ export const calculateFullPosition = (
       : null;
   const netIncomeAfterLoan = calculateNetIncome({
     netIncomeBeforeStudentLoan: takeHomeBase.netTakeHomeAnnual,
-    grossIncome: salary,
+    studentLoanIncome: effectiveSalary,
     taxRegion: region,
     studentLoanPlan: loanPlan,
   });
@@ -1262,5 +1318,71 @@ export const calculateFullPosition = (
     // Meta
     currentYear: TAX_RULES.currentYear,
     taxRegion:    region,
+  };
+};
+
+/** Provenance strings for {@link getPensionBenefitBreakdown} — field path + originating calculator. */
+export const PENSION_BENEFIT_TRACE = {
+  government_top_up_from_personal_pension:
+    'calculateFullPosition.personalPension.basicRelief ← calculatePersonalPensionCost',
+  self_assessment_relief:
+    'calculateFullPosition.personalPension.saRelief ← calculateSelfAssessmentRelief (via calculatePersonalPensionCost)',
+  employer_pension_contribution:
+    'calculateFullPosition.employerGrossAnnual ← calculateRemainingAllowance.employerGross',
+  income_tax_saved_from_salary_sacrifice:
+    'calculateFullPosition.sacrifice.incomeTaxSaving ← calculateSacrificeContribution',
+  national_insurance_saved_from_salary_sacrifice:
+    'calculateFullPosition.sacrifice.niSaving ← calculateSacrificeContribution',
+  total_pension_benefit:
+    'sum of the five breakdown fields (aggregation in getPensionBenefitBreakdown)',
+};
+
+/**
+ * Aggregates pension-related benefits already computed by {@link calculateFullPosition}.
+ * Does not recalculate tax, NI, or relief — reads only from the position object.
+ *
+ * @param {ReturnType<typeof calculateFullPosition>} position
+ * @returns {{
+ *   breakdown: {
+ *     government_top_up_from_personal_pension: number,
+ *     self_assessment_relief: number,
+ *     employer_pension_contribution: number,
+ *     income_tax_saved_from_salary_sacrifice: number,
+ *     national_insurance_saved_from_salary_sacrifice: number,
+ *     total_pension_benefit: number,
+ *   },
+ *   trace: typeof PENSION_BENEFIT_TRACE,
+ * }}
+ */
+export const getPensionBenefitBreakdown = (position) => {
+  const pp = position?.personalPension ?? {};
+  const sac = position?.sacrifice ?? {};
+
+  const government_top_up_from_personal_pension = round2(Number(pp.basicRelief) || 0);
+  const self_assessment_relief = round2(Number(pp.saRelief) || 0);
+  const employer_pension_contribution = round2(Number(position?.employerGrossAnnual) || 0);
+  const income_tax_saved_from_salary_sacrifice = round2(
+    Number(sac.incomeTaxSaving) || 0,
+  );
+  const national_insurance_saved_from_salary_sacrifice = round2(Number(sac.niSaving) || 0);
+
+  const total_pension_benefit = round2(
+    government_top_up_from_personal_pension +
+      self_assessment_relief +
+      employer_pension_contribution +
+      income_tax_saved_from_salary_sacrifice +
+      national_insurance_saved_from_salary_sacrifice,
+  );
+
+  return {
+    breakdown: {
+      government_top_up_from_personal_pension,
+      self_assessment_relief,
+      employer_pension_contribution,
+      income_tax_saved_from_salary_sacrifice,
+      national_insurance_saved_from_salary_sacrifice,
+      total_pension_benefit,
+    },
+    trace: { ...PENSION_BENEFIT_TRACE },
   };
 };

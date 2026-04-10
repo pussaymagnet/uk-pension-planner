@@ -47,18 +47,18 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 ## FEATURE: Tax band panel (`PensionTaxPanel`)
 
-**SOURCE**: `position.taxBand`, `position.updatedAdjustedIncome`, `position.takeHome`, `position.personalPension.saRelief`, `position.pensionBandImpact` (band before personal pension, dropped band), `position.personalPensionNet`.
+**SOURCE**: `position.taxBand`, `position.updatedAdjustedIncome`, `position.takeHome`, `position.personalPension.saRelief`, `position.pensionBandImpact` (band before personal pension, dropped band), `position.personalPensionNet`, `position.allowance` (annual allowance cap and remaining — see `calculateRemainingAllowance`).
 
 **FLOW**:
 
 1. `calculateFullPosition` → `calculateDynamicTaxBand`: `gross_pension = net / 0.8`; `share_plan_deduction` applies only if `sharePlanType === 'pre_tax'`; `income_before_personal_pension = gross − sacrificeGross − share_plan_deduction` (floored at 0); `adjusted_income = income_before_personal_pension − gross_pension` (floored at 0).
 2. `getTaxBand(adjusted_income, region)`: Walks `getIncomeTaxRules(region).bands` and returns `band.name` for the **adjusted** income stack (sacrifice + relief-at-source gross pension + pre-tax share plan).
-3. UI: headline row (rate, band name, adjusted income, net take-home) on the coloured card; **More detail** expands band prose, optional pension-band note, and Self Assessment reclaim amount (`saRelief`) when that value is positive. Static copy (rate %, summary text) keyed by band name (`ENGLAND_CONFIG` / `SCOTLAND_CONFIG` in `PensionTaxPanel.jsx`).
+3. UI: headline row (rate, band name, adjusted income, net take-home) on the coloured card; second row shows `allowance.maxAllowance` and `allowance.remainingAllowance` (annual £); **More detail** expands band prose, optional pension-band note, and Self Assessment reclaim amount (`saRelief`) when that value is positive. Static copy (rate %, summary text) keyed by band name (`ENGLAND_CONFIG` / `SCOTLAND_CONFIG` in `PensionTaxPanel.jsx`).
 4. Self Assessment extra relief on personal pension — see Personal Pension feature (`calculateSelfAssessmentRelief`).
 
 **FORMULA**: **Pre-tax** share plan (e.g. SIP via salary sacrifice) reduces the same income stack as sacrifice. **Post-tax** share plan: `share_plan_deduction = 0` (no effect on taxable income in this model).
 
-**VARIABLES**: `taxBand`, `grossSalary` (hides panel if falsy), `reliefAtSourceExtraSaRelief` (`saRelief` for display).
+**VARIABLES**: `taxBand`, `grossSalary` (hides panel if falsy), `reliefAtSourceExtraSaRelief` (`saRelief` for display), `allowance.maxAllowance`, `allowance.remainingAllowance`.
 
 ---
 
@@ -181,6 +181,8 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 **FORMULA**: Net after all pension = take-home after tax/NI on reduced salary, minus **net** personal pension payment (salary sacrifice already embedded in tax/NI).
 
 **VARIABLES**: `estimatedIncomeTax`, `estimatedNI`, `grossTakeHomeAnnual`/`Monthly`, `netTakeHomeAnnual`/`Monthly`, `sacrificeGross`, `personalPensionNet`.
+
+**Scottish Plan 4 student loan** (when enabled): repayment uses `student_loan_income = gross_salary − salary_sacrifice` (same PAYE gross as tax/NI), not contract gross and not reduced by relief-at-source personal pension. Applied after net take-home from the steps above via `calculateNetIncome`.
 
 ---
 
