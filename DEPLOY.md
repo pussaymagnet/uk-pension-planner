@@ -51,21 +51,43 @@ Save. Sign up / sign in on the live site should work after this.
 
 ---
 
+**After pulling new changes:** check [`supabase/sql-manifest.json`](./supabase/sql-manifest.json) for scripts still marked `pending` and run those in the SQL Editor before relying on signed-in sync. See [`supabase/README.md`](./supabase/README.md).
+
 ## Supabase: budget debts table (Household Budget)
 
-If you use **sign-in** and the **Household Budget** tab, run the SQL in [`supabase/budget_debts.sql`](./supabase/budget_debts.sql) once in the Supabase **SQL Editor** so loan/debt rows sync to the cloud. Local-only users can skip this.
+If you use **sign-in** and the **Household Budget** tab, run the SQL in [`supabase/budget/budget_debts.sql`](./supabase/budget/budget_debts.sql) once in the Supabase **SQL Editor** so loan/debt rows sync to the cloud. Local-only users can skip this.
 
 ## Supabase: expenditure sections (Fixed Costs / Nice to Have)
 
-Run [`supabase/budget_expenditures_section.sql`](./supabase/budget_expenditures_section.sql) once in the **SQL Editor** so the `section` column exists on `budget_expenditures`. Without it, signed-in users may get errors when saving expenditures after upgrading the app.
+Run [`supabase/budget/budget_expenditures_section.sql`](./supabase/budget/budget_expenditures_section.sql) once in the **SQL Editor** so the `section` column exists on `budget_expenditures`. Without it, signed-in users may get errors when saving expenditures after upgrading the app.
 
 ## Supabase: monthly savings
 
-Run [`supabase/budget_savings.sql`](./supabase/budget_savings.sql) once in the **SQL Editor** to create the `budget_savings` table used by the Monthly Savings feature in the Budget tab. Local-only users can skip this.
+Run [`supabase/budget/budget_savings.sql`](./supabase/budget/budget_savings.sql) once in the **SQL Editor** to create the `budget_savings` table used by the Monthly Savings feature in the Budget tab. Local-only users can skip this.
+
+## Supabase: credit cards (balance + minimum payment)
+
+Run [`supabase/budget/budget_credit_cards.sql`](./supabase/budget/budget_credit_cards.sql) once in the **SQL Editor** to create the `budget_credit_cards` table used for credit card lines on the Household Budget tab. Local-only users can skip this.
+
+## Supabase: budget settings (unexpected spending buffer)
+
+Run [`supabase/budget/budget_settings.sql`](./supabase/budget/budget_settings.sql) once in the **SQL Editor** to create the `budget_settings` table for the optional unexpected spending buffer on the Household Budget tab. Local-only users can skip this.
+
+## Supabase: savings goals (Budget tab)
+
+Run [`supabase/budget/budget_goal_savings.sql`](./supabase/budget/budget_goal_savings.sql) and [`supabase/budget/budget_goal_savings_committed.sql`](./supabase/budget/budget_goal_savings_committed.sql) in the **SQL Editor** as needed for savings goals sync (tables/columns for goals and committed monthly amounts). Local-only users can skip this.
 
 ## Supabase: pension income tax region (England & Wales vs Scotland)
 
-Run [`supabase/pension_inputs_tax_region.sql`](./supabase/pension_inputs_tax_region.sql) once in the **SQL Editor** to add the `tax_region` column on `pension_inputs`. Without it, saving the England/Scotland toggle while signed in may fail. The app still works offline with `localStorage`.
+Run [`supabase/pension/pension_inputs_tax_region.sql`](./supabase/pension/pension_inputs_tax_region.sql) once in the **SQL Editor** to add the `tax_region` column on `pension_inputs`. Without it, saving the England/Scotland toggle while signed in may fail. The app still works offline with `localStorage`.
+
+## Supabase: pension inputs (bonus, share plan, student loan)
+
+If you use signed-in sync for pension inputs, run these in the **SQL Editor** when your app version expects the columns:
+
+- [`supabase/pension/pension_inputs_bonus_income.sql`](./supabase/pension/pension_inputs_bonus_income.sql)
+- [`supabase/pension/pension_inputs_share_plan.sql`](./supabase/pension/pension_inputs_share_plan.sql)
+- [`supabase/pension/pension_inputs_student_loan.sql`](./supabase/pension/pension_inputs_student_loan.sql)
 
 ---
 

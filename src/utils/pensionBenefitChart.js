@@ -3,6 +3,8 @@
  * No recalculation — reads numeric fields only. Excludes total_pension_benefit.
  */
 
+import { annualAmountForDisplay } from './displayPeriodMoney.js';
+
 const ROW_DEFS = [
   { source_key: 'government_top_up_from_personal_pension', label: 'Government Top-Up' },
   { source_key: 'self_assessment_relief', label: 'Self Assessment Relief' },
@@ -13,17 +15,17 @@ const ROW_DEFS = [
 
 /**
  * @param {object} breakdown — getPensionBenefitBreakdown(position).breakdown
- * @param {{ hideZeros?: boolean, sortDesc?: boolean }} [options]
+ * @param {{ hideZeros?: boolean, sortDesc?: boolean, displayPeriod?: 'annual'|'monthly' }} [options]
  * @returns {{ label: string, value: number, source_key: string }[]}
  */
 export function buildPensionBenefitChartData(breakdown, options = {}) {
-  const { hideZeros = true, sortDesc = true } = options;
+  const { hideZeros = true, sortDesc = true, displayPeriod = 'annual' } = options;
   if (!breakdown || typeof breakdown !== 'object') return [];
 
   let rows = ROW_DEFS.map(({ source_key, label }) => ({
     label,
     source_key,
-    value: Number(breakdown[source_key]) || 0,
+    value: annualAmountForDisplay(Number(breakdown[source_key]) || 0, displayPeriod),
   }));
 
   if (hideZeros) {

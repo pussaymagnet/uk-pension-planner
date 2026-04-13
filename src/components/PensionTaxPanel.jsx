@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { formatCurrency } from '../utils/calculations';
+import { annualAmountForDisplay } from '../utils/displayPeriodMoney';
 import { getLabel, periodSlashSuffix } from '../utils/fieldLabels';
 
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -87,6 +88,10 @@ export default function PensionTaxPanel({
   takeHome,
   displayPeriod = 'annual',
   grossSalary = 0,
+  employmentGrossIncome = 0,
+  bonusIncome = 0,
+  benefitInKindAnnual = 0,
+  benefitInKindIncomeTaxImpact = 0,
   taxRegion = 'england',
   reliefAtSourceExtraSaRelief = 0,
   taxBandBeforePersonalPension,
@@ -120,7 +125,12 @@ export default function PensionTaxPanel({
     };
   }, [aaHelpOpen]);
 
-  if (!Number(grossSalary)) return null;
+  const hasEmploymentIncome =
+    Number(grossSalary) > 0
+    || Number(employmentGrossIncome) > 0
+    || Number(bonusIncome) > 0
+    || Number(benefitInKindAnnual) > 0;
+  if (!hasEmploymentIncome) return null;
   if (!takeHome) return null;
 
   const isScotland = taxRegion === 'scotland';
@@ -146,6 +156,14 @@ export default function PensionTaxPanel({
   const headlineNet = hasStudentLoan ? afterAll : afterPensionBeforeLoan;
 
   const period = periodSlashSuffix(displayPeriod);
+
+  const bikAnnual = Number(benefitInKindAnnual) || 0;
+  const bikShown = annualAmountForDisplay(bikAnnual, displayPeriod);
+  const bikTaxShown = annualAmountForDisplay(
+    Number(benefitInKindIncomeTaxImpact) || 0,
+    displayPeriod,
+  );
+  const showBikSummary = bikAnnual > 0;
 
   const saRelief = Number(reliefAtSourceExtraSaRelief) || 0;
   const showMarginalReliefNote = saRelief > 0;
@@ -190,6 +208,30 @@ export default function PensionTaxPanel({
           </span>
           <span className="ml-0.5 text-xs text-slate-500">{period}</span>
         </div>
+        {showBikSummary && (
+          <>
+            <span className="hidden text-slate-400 sm:inline" aria-hidden>
+              ·
+            </span>
+            <div className="min-w-0 text-xs sm:text-sm">
+              <span className="text-slate-600">{getLabel('benefit_in_kind_taxable')}</span>{' '}
+              <span className="font-semibold tabular-nums text-slate-900">
+                {formatCurrency(r2(bikShown))}
+              </span>
+              <span className="ml-0.5 text-xs text-slate-500">{period}</span>
+            </div>
+            <span className="hidden text-slate-400 sm:inline" aria-hidden>
+              ·
+            </span>
+            <div className="min-w-0 text-xs sm:text-sm">
+              <span className="text-slate-600">{getLabel('benefit_in_kind_tax_impact')}</span>{' '}
+              <span className="font-semibold tabular-nums text-slate-900">
+                {formatCurrency(r2(bikTaxShown))}
+              </span>
+              <span className="ml-0.5 text-xs text-slate-500">{period}</span>
+            </div>
+          </>
+        )}
       </div>
 
       {allowance != null && maxAA > 0 && (

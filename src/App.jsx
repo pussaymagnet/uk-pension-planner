@@ -13,7 +13,7 @@ import InputForm from './components/InputForm';
 import PensionTaxPanel from './components/PensionTaxPanel';
 import PensionBenefitBarChart from './components/PensionBenefitBarChart';
 import PensionValueStackedBarChart from './components/PensionValueStackedBarChart';
-import BudgetTab from './components/BudgetTab';
+import BudgetFeature from './features/budget/BudgetFeature';
 import AuthModal from './components/AuthModal';
 import { useUser } from './hooks/useUser';
 import { supabase } from './lib/supabase';
@@ -23,6 +23,8 @@ import { getLabel } from './utils/fieldLabels';
 
 const DEFAULT_INPUTS = {
   grossSalary:            '',
+  bonusIncome:            '',
+  benefitInKindTaxable:   '',
   employeeValue:          '',
   employerValue:          '',
   personalPensionNet:     '',
@@ -133,6 +135,14 @@ export default function App() {
           setInputs({
             ...DEFAULT_INPUTS,
             grossSalary:        String(data.gross_salary        ?? ''),
+            bonusIncome:
+              data.bonus_income != null && data.bonus_income !== ''
+                ? String(data.bonus_income)
+                : '',
+            benefitInKindTaxable:
+              data.benefit_in_kind_taxable != null && data.benefit_in_kind_taxable !== ''
+                ? String(data.benefit_in_kind_taxable)
+                : '',
             employeeValue:      String(data.employee_value      ?? ''),
             employerValue:      String(data.employer_value      ?? ''),
             personalPensionNet: String(data.personal_pension_net ?? ''),
@@ -161,6 +171,14 @@ export default function App() {
       await supabase.from('pension_inputs').upsert({
         user_id:             user.id,
         gross_salary:        inputs.grossSalary        !== '' ? Number(inputs.grossSalary)        : null,
+        bonus_income:
+          inputs.bonusIncome !== '' && inputs.bonusIncome !== undefined
+            ? Number(inputs.bonusIncome)
+            : null,
+        benefit_in_kind_taxable:
+          inputs.benefitInKindTaxable !== '' && inputs.benefitInKindTaxable !== undefined
+            ? Number(inputs.benefitInKindTaxable)
+            : null,
         employee_value:      inputs.employeeValue      !== '' ? Number(inputs.employeeValue)      : null,
         employer_value:      inputs.employerValue      !== '' ? Number(inputs.employerValue)      : null,
         personal_pension_net: inputs.personalPensionNet !== '' ? Number(inputs.personalPensionNet) : null,
@@ -231,6 +249,16 @@ export default function App() {
       ? Number(inputs.sharePlanContribution)
       : 0;
 
+  const bonusAnnual =
+    inputs.bonusIncome !== '' && inputs.bonusIncome !== undefined
+      ? Number(inputs.bonusIncome)
+      : 0;
+
+  const benefitInKindAnnual =
+    inputs.benefitInKindTaxable !== '' && inputs.benefitInKindTaxable !== undefined
+      ? Number(inputs.benefitInKindTaxable)
+      : 0;
+
   const position = calculateFullPosition(
     inputs.grossSalary,
     empPct,
@@ -240,13 +268,18 @@ export default function App() {
     sharePlanAnnual,
     inputs.sharePlanType || 'post_tax',
     inputs.studentLoanPlan === STUDENT_LOAN_PLAN_4 ? STUDENT_LOAN_PLAN_4 : null,
+    bonusAnnual,
+    benefitInKindAnnual,
   );
 
   const pensionBenefit = getPensionBenefitBreakdown(position);
-  const pensionBenefitChartData = buildPensionBenefitChartData(pensionBenefit.breakdown);
+  const pensionBenefitChartData = buildPensionBenefitChartData(pensionBenefit.breakdown, {
+    displayPeriod,
+  });
   const pensionValueStacked = buildPensionValueStackedChartData(
     position,
     pensionBenefit.breakdown,
+    displayPeriod,
   );
 
   const netMonthlyIncome = position.takeHome?.netTakeHomeMonthly ?? 0;
@@ -258,6 +291,8 @@ export default function App() {
     localStorage.removeItem('pension-planner-budget');
     localStorage.removeItem('pension-planner-budget-debts');
     localStorage.removeItem('pension-planner-budget-savings');
+    localStorage.removeItem('pension-planner-budget-credit-cards');
+    localStorage.removeItem('pension-planner-budget-unexpected-buffer');
     setInputs(DEFAULT_INPUTS);
     setTaxRegion('england');
     loadedForUser.current = null;
@@ -377,6 +412,10 @@ export default function App() {
                 takeHome={position.takeHome}
                 displayPeriod={displayPeriod}
                 grossSalary={position.grossSalary}
+                employmentGrossIncome={position.employmentGrossIncome}
+                bonusIncome={position.bonusIncome}
+                benefitInKindAnnual={position.benefitInKindAnnual}
+                benefitInKindIncomeTaxImpact={position.benefitInKindIncomeTaxImpact}
                 taxRegion={taxRegion}
                 reliefAtSourceExtraSaRelief={position.personalPension.saRelief}
                 taxBandBeforePersonalPension={position.pensionBandImpact?.taxBandBeforePersonalPension}
@@ -388,10 +427,14 @@ export default function App() {
                 <PensionValueStackedBarChart
                   summary={pensionValueStacked.summary}
                   detailed={pensionValueStacked.detailed}
+                  displayPeriod={displayPeriod}
                 />
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <PensionBenefitBarChart data={pensionBenefitChartData} />
+                <PensionBenefitBarChart
+                  data={pensionBenefitChartData}
+                  displayPeriod={displayPeriod}
+                />
               </div>
               <details>
                 <summary>Pension benefit breakdown (audit)</summary>
@@ -409,7 +452,7 @@ export default function App() {
 
         {/* Budget tab — always mounted */}
         <div className={activeTab === 'budget' ? '' : 'hidden'}>
-          <BudgetTab netMonthlyIncome={netMonthlyIncome} user={user} />
+          <BudgetFeature netMonthlyIncome={netMonthlyIncome} user={user} />
         </div>
 
       </main>

@@ -1,5 +1,5 @@
 import { formatCurrency } from '../utils/calculations';
-import { getFieldLabel, getLabel, periodSlashSuffix } from '../utils/fieldLabels';
+import { getFieldLabel, getLabel, periodSlashSuffix, withDisplayPeriodLabel } from '../utils/fieldLabels';
 
 /**
  * InputForm — controlled inputs for all financial details.
@@ -11,7 +11,15 @@ const r2 = (n) => Math.round(n * 100) / 100;
 
 /** Fields stored as annual £ in app state but shown as monthly £ when isMonthly */
 function usesCurrencyPeriod(field, contributionMode) {
-  if (field === 'grossSalary' || field === 'personalPensionNet' || field === 'sharePlanContribution') return true;
+  if (
+    field === 'grossSalary'
+    || field === 'bonusIncome'
+    || field === 'benefitInKindTaxable'
+    || field === 'personalPensionNet'
+    || field === 'sharePlanContribution'
+  ) {
+    return true;
+  }
   if (contributionMode === 'nominal' && (field === 'employeeValue' || field === 'employerValue')) {
     return true;
   }
@@ -138,7 +146,9 @@ export default function InputForm({
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
       <div className="flex items-start justify-between mb-3 gap-3 flex-wrap">
-        <h2 className="text-base font-semibold text-slate-900">{getLabel('pension_inputs')}</h2>
+        <h2 className="text-base font-semibold text-slate-900">
+          {withDisplayPeriodLabel(getLabel('pension_inputs'), displayPeriod)}
+        </h2>
         <div className="flex flex-col items-end gap-1">
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-500 whitespace-nowrap">{getLabel('contribution_mode')}</span>
@@ -153,6 +163,31 @@ export default function InputForm({
           prefix="£"
           value={annualToDisplay(values.grossSalary, 'grossSalary', isMonthly, contributionMode)}
           onChange={handleFieldChange('grossSalary')}
+          min={0}
+          max={grossMax}
+          step={grossStep}
+        />
+
+        <InputField
+          label={getFieldLabel('bonusIncome')}
+          prefix="£"
+          value={annualToDisplay(values.bonusIncome ?? '', 'bonusIncome', isMonthly, contributionMode)}
+          onChange={handleFieldChange('bonusIncome')}
+          min={0}
+          max={grossMax}
+          step={grossStep}
+        />
+
+        <InputField
+          label={getFieldLabel('benefitInKindTaxable')}
+          prefix="£"
+          value={annualToDisplay(
+            values.benefitInKindTaxable ?? '',
+            'benefitInKindTaxable',
+            isMonthly,
+            contributionMode,
+          )}
+          onChange={handleFieldChange('benefitInKindTaxable')}
           min={0}
           max={grossMax}
           step={grossStep}

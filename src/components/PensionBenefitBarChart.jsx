@@ -1,11 +1,12 @@
 import { formatCurrency } from '../utils/calculations';
+import { getLabel, withDisplayPeriodLabel } from '../utils/fieldLabels';
 
 /**
  * Horizontal bar chart from buildPensionBenefitChartData — no recalculation.
  *
- * @param {{ data: { label: string, value: number, source_key: string }[] }} props
+ * @param {{ data: { label: string, value: number, source_key: string }[], displayPeriod?: 'annual'|'monthly' }} props — values are annual or monthly per header toggle
  */
-export default function PensionBenefitBarChart({ data }) {
+export default function PensionBenefitBarChart({ data, displayPeriod = 'annual' }) {
   const max = Math.max(...data.map((d) => d.value), 0);
   const scale = max > 0 ? max : 1;
 
@@ -15,11 +16,14 @@ export default function PensionBenefitBarChart({ data }) {
     );
   }
 
+  const heading = withDisplayPeriodLabel(
+    getLabel('chart_where_pension_benefits_from'),
+    displayPeriod,
+  );
+
   return (
-    <div className="space-y-3" aria-label="Where your pension benefits come from">
-      <h3 className="text-sm font-semibold text-slate-800">
-        Where your pension benefits come from
-      </h3>
+    <div className="space-y-3" aria-label={heading}>
+      <h3 className="text-sm font-semibold text-slate-800">{heading}</h3>
       <ul className="m-0 list-none space-y-3 p-0">
         {data.map((row) => (
           <li key={row.source_key}>

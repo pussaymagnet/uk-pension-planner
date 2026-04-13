@@ -1,4 +1,4 @@
-/** Expenditure section: Fixed Costs vs Nice to Have */
+/** Household cost section: essential costs vs flexible spending (stored as fixed / niceToHave) */
 export const SECTION_FIXED = 'fixed';
 export const SECTION_NICE = 'niceToHave';
 
@@ -26,5 +26,21 @@ export function normalizeExpenditureRow(r) {
     amount: r2(Number(r.amount) || 0),
     partner1Pct: r2(Number(r.partner1_pct ?? r.partner1Pct) ?? 100),
     section,
+  };
+}
+
+/**
+ * Credit card row from Supabase or localStorage.
+ */
+export function normalizeCreditCardRow(r) {
+  const aprRaw = r.apr_pct ?? r.apr;
+  const aprNum = aprRaw != null && aprRaw !== '' ? Number(aprRaw) : NaN;
+  return {
+    id: r.id,
+    name: r.name ?? '',
+    totalBalance: r2(Number(r.total_balance ?? r.totalBalance) || 0),
+    minimumMonthlyPayment: r2(Number(r.minimum_monthly_payment ?? r.minimumMonthlyPayment) || 0),
+    ...(Number.isFinite(aprNum) ? { apr: r2(aprNum) } : {}),
+    notes: typeof r.notes === 'string' ? r.notes : r.notes != null ? String(r.notes) : '',
   };
 }

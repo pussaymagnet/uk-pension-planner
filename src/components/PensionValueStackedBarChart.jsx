@@ -1,12 +1,18 @@
 import { formatCurrency } from '../utils/calculations';
+import { getLabel, withDisplayPeriodLabel } from '../utils/fieldLabels';
 
 /**
  * @param {{
  *   summary: { label: string, yourMoney: number, freeMoney: number, grandTotal: number }[],
  *   detailed: { label: string, value: number, type: 'your_money' | 'free_money', source_key: string }[],
- * }} props
+ *   displayPeriod?: 'annual'|'monthly',
+ * }} props — monetary values are annual or monthly per header toggle
  */
-export default function PensionValueStackedBarChart({ summary, detailed }) {
+export default function PensionValueStackedBarChart({
+  summary,
+  detailed,
+  displayPeriod = 'annual',
+}) {
   const row = summary[0];
   if (!row) return null;
 
@@ -30,7 +36,9 @@ export default function PensionValueStackedBarChart({ summary, detailed }) {
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="text-sm font-semibold text-slate-800">Your money vs free money</h3>
+        <h3 className="text-sm font-semibold text-slate-800">
+          {withDisplayPeriodLabel(getLabel('chart_your_money_vs_free_money'), displayPeriod)}
+        </h3>
         <p className="mt-0.5 text-xs text-slate-500">
           Free money includes employer contributions, tax relief, and tax savings.
         </p>
@@ -64,7 +72,9 @@ export default function PensionValueStackedBarChart({ summary, detailed }) {
 
       {yourLines.length > 0 && (
         <div className="text-xs text-slate-600">
-          <span className="font-medium text-slate-700">Your contribution detail</span>
+          <span className="font-medium text-slate-700">
+            {withDisplayPeriodLabel(getLabel('chart_your_contribution_detail'), displayPeriod)}
+          </span>
           <ul className="mt-1 list-inside list-disc space-y-0.5">
             {yourLines.map((d) => (
               <li key={d.source_key}>
@@ -78,7 +88,9 @@ export default function PensionValueStackedBarChart({ summary, detailed }) {
 
       {freeLines.length > 0 && (
         <div className="text-xs text-slate-600">
-          <span className="font-medium text-emerald-900">Free money detail</span>
+          <span className="font-medium text-emerald-900">
+            {withDisplayPeriodLabel(getLabel('chart_free_money_detail'), displayPeriod)}
+          </span>
           <ul className="mt-1 list-inside list-disc space-y-0.5">
             {freeLines.map((d) => (
               <li key={d.source_key}>

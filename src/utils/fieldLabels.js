@@ -42,3 +42,17 @@ export function getFieldLabel(camelCaseStateKey) {
 export function periodSlashSuffix(displayPeriod) {
   return displayPeriod === 'monthly' ? getLabel('slash_month') : getLabel('slash_year');
 }
+
+/**
+ * Section heading with active display period (Per year / Per month).
+ * @param {string} baseTitle
+ * @param {'annual'|'monthly'} displayPeriod
+ * @returns {string}
+ */
+export function withDisplayPeriodLabel(baseTitle, displayPeriod) {
+  const periodLabel =
+    displayPeriod === 'monthly'
+      ? getLabel('display_period_monthly')
+      : getLabel('display_period_annual');
+  return `${baseTitle} — ${periodLabel}`;
+}

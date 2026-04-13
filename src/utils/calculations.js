@@ -217,37 +217,50 @@ const computeIncomeTaxScotland = (grossAnnual, adjustedNetIncome) => {
 };
 
 /**
- * Returns [incomeTax, ni] for a given salary using TAX_RULES.
+ * Returns [incomeTax, ni] for a given earnings figure using TAX_RULES.
  * Used internally for salary-sacrifice "difference" calculations.
  *
  * Income tax includes **personal allowance taper** when `adjustedNetIncomeForPA` is supplied;
- * otherwise ANI is assumed equal to `salary` (typical for employment-only estimates).
+ * otherwise ANI is assumed equal to the income-tax gross (typical for employment-only estimates).
  * Does not model gift aid / gross pension in ANI — pass a computed ANI if you need that.
  *
- * @param {number} salary
+ * **Benefit in kind (BIK)**: pass `grossForIncomeTax` to tax employment benefits that are
+ * taxable for income tax but not Class 1 NI. NI always uses `grossForNI`.
+ *
+ * @param {number} grossForNI Earnings for Class 1 primary NI (excludes typical cash-equivalent BIK)
  * @param {string} [taxRegion]
  * @param {number | null} [adjustedNetIncomeForPA] Adjusted net income for PA taper (see HMRC)
+ * @param {number | null} [grossForIncomeTax] If set, income tax uses this gross instead of `grossForNI`
  * @returns {[number, number]}
  */
-const _incomeTaxAndNI = (salary, taxRegion = 'england', adjustedNetIncomeForPA = null) => {
+const _incomeTaxAndNI = (
+  grossForNI,
+  taxRegion = 'england',
+  adjustedNetIncomeForPA = null,
+  grossForIncomeTax = null,
+) => {
   const region = normalizeTaxRegion(taxRegion);
-  const gross = Number(salary) || 0;
+  const grossNI = Math.max(0, Number(grossForNI) || 0);
+  const grossIT =
+    grossForIncomeTax != null && Number.isFinite(Number(grossForIncomeTax))
+      ? Math.max(0, Number(grossForIncomeTax))
+      : grossNI;
   const ani = adjustedNetIncomeForPA != null && Number.isFinite(Number(adjustedNetIncomeForPA))
     ? Number(adjustedNetIncomeForPA)
-    : gross;
+    : grossIT;
 
   const incomeTax =
     region === 'scotland'
-      ? computeIncomeTaxScotland(gross, ani)
-      : computeIncomeTaxEnglandWales(gross, ani);
+      ? computeIncomeTaxScotland(grossIT, ani)
+      : computeIncomeTaxEnglandWales(grossIT, ani);
 
-  // Class 1 primary NI
+  // Class 1 primary NI — earnings only (excludes taxable benefits in kind in this model)
   const { primaryThreshold: pt, upperEarningsLimit: uel,
     mainRate, upperRate } = TAX_RULES.nationalInsurance;
   let ni = 0;
-  if (gross > pt) {
-    ni += (Math.min(gross, uel) - pt) * mainRate / 100;
-    if (gross > uel) ni += (gross - uel) * upperRate / 100;
+  if (grossNI > pt) {
+    ni += (Math.min(grossNI, uel) - pt) * mainRate / 100;
+    if (grossNI > uel) ni += (grossNI - uel) * upperRate / 100;
   }
 
   return [round2(incomeTax), round2(ni)];
@@ -334,6 +347,7 @@ export const getPreHigherRateIncomeLimit = (taxRegion = 'england') => {
  * @param {number} salarySacrifice Employee pension sacrifice (pre-tax), £/year
  * @param {'england' | 'scotland'} [taxRegion='england']
  * @param {number} [sharePlanDeduction=0] Pre-tax share plan £/year (reduces income before higher-rate guide)
+ * @param {number} [additionalTaxableBenefit=0] Annual taxable BIK etc. — increases income for band / threshold guide only (non-cash)
  * @returns {{
  *   adjusted_income: number,
  *   tax_band: string,
@@ -348,18 +362,21 @@ export const calculateAdjustedIncomeAndPension = (
   salarySacrifice,
   taxRegion = 'england',
   sharePlanDeduction = 0,
+  additionalTaxableBenefit = 0,
 ) => {
   const region = normalizeTaxRegion(taxRegion);
   const gross = Number(grossIncome) || 0;
   const sacrifice = Number(salarySacrifice) || 0;
   const shareDed = round2(Math.max(0, Number(sharePlanDeduction) || 0));
+  const bik = round2(Math.max(0, Number(additionalTaxableBenefit) || 0));
   const adjusted_income = round2(gross - sacrifice - shareDed);
-  const tax_band = getTaxBand(adjusted_income, region);
+  const adjusted_for_bands = round2(adjusted_income + bik);
+  const tax_band = getTaxBand(adjusted_for_bands, region);
   const pre_higher_threshold = getPreHigherRateIncomeLimit(region);
 
   let required_gross_reduction = 0;
-  if (pre_higher_threshold > 0 && adjusted_income > pre_higher_threshold) {
-    required_gross_reduction = round2(adjusted_income - pre_higher_threshold);
+  if (pre_higher_threshold > 0 && adjusted_for_bands > pre_higher_threshold) {
+    required_gross_reduction = round2(adjusted_for_bands - pre_higher_threshold);
   }
 
   const rasMult = TAX_RULES.pension.taxRelief.reliefAtSourceMultiplier;
@@ -373,19 +390,20 @@ export const calculateAdjustedIncomeAndPension = (
       gross_income: gross,
       salary_sacrifice: sacrifice,
       share_plan_deduction: shareDed,
+      additional_taxable_benefit: bik,
       tax_region: region === 'scotland' ? 'Scotland' : 'England',
     },
     steps: [
       {
         id: 1,
         label: 'Adjusted income',
-        detail: 'gross_income − salary_sacrifice − share_plan_deduction (pre-tax only)',
-        value: adjusted_income,
+        detail: 'gross_income − salary_sacrifice − share_plan_deduction + taxable BIK (pre-tax cash + benefits)',
+        value: adjusted_for_bands,
       },
       {
         id: 2,
         label: 'Tax band',
-        detail: 'getTaxBand(adjusted_income, region)',
+        detail: 'getTaxBand(adjusted income incl. taxable BIK, region)',
         value: tax_band,
       },
       {
@@ -430,6 +448,7 @@ export const calculateAdjustedIncomeAndPension = (
  * @param {number} personalPensionNet Net annual £ (relief at source)
  * @param {'england' | 'scotland'} [taxRegion='england']
  * @param {SharePlanOptions} [sharePlanOptions]
+ * @param {number} [benefitInKindAnnual=0] Annual taxable BIK — income tax only; widens tax bands / headline adjusted income
  */
 export const calculateDynamicTaxBand = (
   grossIncome,
@@ -437,11 +456,13 @@ export const calculateDynamicTaxBand = (
   personalPensionNet,
   taxRegion = 'england',
   sharePlanOptions = {},
+  benefitInKindAnnual = 0,
 ) => {
   const region = normalizeTaxRegion(taxRegion);
   const gross = Number(grossIncome) || 0;
   const sacrifice = Number(salarySacrificeGross) || 0;
   const ppNet = Number(personalPensionNet) || 0;
+  const bik = round2(Math.max(0, Number(benefitInKindAnnual) || 0));
   const sharePlanType = sharePlanOptions.sharePlanType ?? SHARE_PLAN_TYPES.POST_TAX;
   const sharePlanContribution = Number(sharePlanOptions.sharePlanContribution) || 0;
 
@@ -461,14 +482,16 @@ export const calculateDynamicTaxBand = (
     sharePlanContribution,
     sharePlanType,
   });
-  const adjusted_income = incomeParts.updated_adjusted_income;
+  const adjusted_income_before_bik = incomeParts.updated_adjusted_income;
+  const adjusted_income = round2(adjusted_income_before_bik + bik);
 
   const tax_band = getTaxBand(adjusted_income, region);
   const marginalIncomeTaxRate = getMarginalIncomeTaxRate(adjusted_income, region);
 
-  const tax_band_before_personal_pension = getTaxBand(income_before_personal_pension, region);
+  const income_before_pp_for_bands = round2(income_before_personal_pension + bik);
+  const tax_band_before_personal_pension = getTaxBand(income_before_pp_for_bands, region);
   const marginal_rate_before_personal_pension = getMarginalIncomeTaxRate(
-    income_before_personal_pension,
+    income_before_pp_for_bands,
     region,
   );
 
@@ -480,6 +503,7 @@ export const calculateDynamicTaxBand = (
     sacrifice,
     region,
     share_plan_deduction_applied,
+    bik,
   );
   /** Full net RAS pension to bring income to pre–higher-rate limit (from £0 PP). Not residual − ppNet, so InputForm hint stays stable while editing personal pension. */
   const remaining_needed = Math.max(
@@ -494,6 +518,7 @@ export const calculateDynamicTaxBand = (
       personal_pension_net: ppNet,
       share_plan_contribution: sharePlanContribution,
       share_plan_type: sharePlanType,
+      benefit_in_kind_annual: bik,
     },
     steps: [
       {
@@ -507,7 +532,7 @@ export const calculateDynamicTaxBand = (
       {
         id: 4,
         label: 'Tax band',
-        detail: 'getTaxBand(adjusted_income, region)',
+        detail: 'getTaxBand(adjusted_income incl. taxable BIK, region)',
         value: tax_band,
       },
     ],
@@ -515,6 +540,8 @@ export const calculateDynamicTaxBand = (
 
   return {
     adjusted_income,
+    adjusted_income_before_bik,
+    benefit_in_kind_annual: bik,
     gross_pension,
     income_before_personal_pension,
     share_plan_deduction_applied,
@@ -555,6 +582,7 @@ export const calculateDynamicTaxBand = (
  * @param {number} personalPensionNet Net annual £ (relief at source)
  * @param {'england' | 'scotland'} [taxRegion='england']
  * @param {SharePlanOptions} [sharePlanOptions]
+ * @param {number} [benefitInKindAnnual=0] Taxable BIK for banding (income tax only)
  * @returns {{
  *   gross_pension: number,
  *   adjusted_income: number,
@@ -578,6 +606,7 @@ export const calculateSelfAssessmentRelief = (
   personalPensionNet,
   taxRegion = 'england',
   sharePlanOptions = {},
+  benefitInKindAnnual = 0,
 ) => {
   const region = normalizeTaxRegion(taxRegion);
   const dyn = calculateDynamicTaxBand(
@@ -586,6 +615,7 @@ export const calculateSelfAssessmentRelief = (
     personalPensionNet,
     region,
     sharePlanOptions,
+    benefitInKindAnnual,
   );
 
   const gross_pension = dyn.gross_pension;
@@ -720,8 +750,11 @@ export const calculateSelfAssessmentRelief = (
  *
  * The "net cost" is the gross sacrifice minus those tax/NI savings.
  *
- * @param {number} grossSalary
+ * @param {number} grossSalary Pensionable base salary (sacrifice % applies here only)
  * @param {number} employeeSacrificePct  % of gross salary to sacrifice
+ * @param {'england' | 'scotland'} [taxRegion='england']
+ * @param {number} [bonusIncome=0] Annual gross bonus — taxed/NI’d in both branches (not subject to sacrifice)
+ * @param {number} [benefitInKindAnnual=0] Taxable BIK — increases income tax in both branches, not NI
  * @returns {{
  *   sacrificeGross:    number,  // annual gross going into pension
  *   incomeTaxSaving:   number,  // income tax saved vs no sacrifice
@@ -732,16 +765,26 @@ export const calculateSelfAssessmentRelief = (
  *   monthlyGross:      number,
  * }}
  */
-export const calculateSacrificeContribution = (grossSalary, employeeSacrificePct, taxRegion = 'england') => {
+export const calculateSacrificeContribution = (
+  grossSalary,
+  employeeSacrificePct,
+  taxRegion = 'england',
+  bonusIncome = 0,
+  benefitInKindAnnual = 0,
+) => {
   const salary = Number(grossSalary) || 0;
+  const bonus = Math.max(0, Number(bonusIncome) || 0);
+  const bik = round2(Math.max(0, Number(benefitInKindAnnual) || 0));
   const pct    = Number(employeeSacrificePct) || 0;
   const region = normalizeTaxRegion(taxRegion);
 
   const sacrificeGross = round2((pct / 100) * salary);
   const salaryReduced  = salary - sacrificeGross;
 
-  const [itFull,    niFull]    = _incomeTaxAndNI(salary, region);
-  const [itReduced, niReduced] = _incomeTaxAndNI(salaryReduced, region);
+  const payFull = salary + bonus;
+  const payReduced = salaryReduced + bonus;
+  const [itFull,    niFull]    = _incomeTaxAndNI(payFull, region, null, payFull + bik);
+  const [itReduced, niReduced] = _incomeTaxAndNI(payReduced, region, null, payReduced + bik);
 
   const incomeTaxSaving = round2(itFull - itReduced);
   const niSaving        = round2(niFull - niReduced);
@@ -770,11 +813,12 @@ export const calculateSacrificeContribution = (grossSalary, employeeSacrificePct
  * basic-rate top-up from HMRC.
  * Higher / additional rate payers can reclaim further via Self Assessment.
  *
- * @param {number} grossSalary         Gross annual salary (before sacrifice)
+ * @param {number} grossSalary         Gross employment income for bands/SA (pensionable salary + bonus where applicable)
  * @param {number} salarySacrificeGross Annual £ salary sacrifice (pre-tax)
  * @param {number} personalPensionNet  Net annual £ the employee actually pays
  * @param {'england' | 'scotland'} [taxRegion='england']
  * @param {SharePlanOptions} [sharePlanOptions]
+ * @param {number} [benefitInKindAnnual=0] Taxable BIK for SA / band modelling
  * @returns {{
  *   grossPension:    number,  // gross landed in pension pot (net / 0.8)
  *   netPaid:         number,  // same as input — what leaves the bank
@@ -792,6 +836,7 @@ export const calculatePersonalPensionCost = (
   personalPensionNet,
   taxRegion = 'england',
   sharePlanOptions = {},
+  benefitInKindAnnual = 0,
 ) => {
   const netPaid = Number(personalPensionNet) || 0;
   const region  = normalizeTaxRegion(taxRegion);
@@ -806,6 +851,7 @@ export const calculatePersonalPensionCost = (
     personalPensionNet,
     region,
     sharePlanOptions,
+    benefitInKindAnnual,
   );
   const saRelief = selfAssessment.self_assessment_relief;
   const saReliefExtraPct =
@@ -913,9 +959,11 @@ export const calculateRemainingAllowance = (
  *
  * @param {number} employeeSacrificePct
  * @param {number} employerPercent
- * @param {number} grossSalary
+ * @param {number} grossSalary Pensionable base (for % targets and shortfall £)
  * @param {number} personalPensionNet
  * @param {SharePlanOptions} [sharePlanOptions]
+ * @param {number} [employmentGrossIncome] Gross employment income for SA relief (salary + bonus); defaults to grossSalary
+ * @param {number} [benefitInKindAnnual=0] Taxable BIK for SA relief estimate
  */
 export const calculateRecommendation = (
   employeeSacrificePct,
@@ -924,6 +972,8 @@ export const calculateRecommendation = (
   personalPensionNet = 0,
   taxRegion = 'england',
   sharePlanOptions = {},
+  employmentGrossIncome,
+  benefitInKindAnnual = 0,
 ) => {
   const sacPct   = Number(employeeSacrificePct) || 0;
   const erPct    = Number(employerPercent) || 0;
@@ -931,6 +981,11 @@ export const calculateRecommendation = (
   const ppNet    = Number(personalPensionNet) || 0;
   const region   = normalizeTaxRegion(taxRegion);
   const target   = TAX_RULES.pension.recommendation.minimumTotalPercentage;
+
+  const grossForSa =
+    employmentGrossIncome != null && Number.isFinite(Number(employmentGrossIncome))
+      ? Math.max(0, round2(Number(employmentGrossIncome)))
+      : salary;
 
   // Convert personal pension to gross equivalent % for like-for-like comparison
   const multiplier   = TAX_RULES.pension.taxRelief.reliefAtSourceMultiplier;
@@ -951,11 +1006,12 @@ export const calculateRecommendation = (
 
   // Extra SA relief on gross personal pension (matches calculatePersonalPensionCost)
   const additionalReliefAnnual = calculateSelfAssessmentRelief(
-    salary,
+    grossForSa,
     sacrificeGross,
     ppNet,
     region,
     sharePlanOptions,
+    benefitInKindAnnual,
   ).self_assessment_relief;
   const eligibleForAdditionalRelief = additionalReliefAnnual > 0;
   const additionalReliefPercent =
@@ -1131,32 +1187,52 @@ export const calculateNetIncome = ({
  *  - Salary sacrifice reduces taxable income → lower IT and NI
  *  - Personal pension is deducted from after-tax take-home
  *
- * @param {number} grossSalary
+ * @param {number} grossSalary Pensionable base salary (before sacrifice; sacrifice % applies here only)
  * @param {number} employeeSacrificePct
  * @param {number} personalPensionNet
+ * @param {'england' | 'scotland'} [taxRegion='england']
+ * @param {number} [bonusIncome=0] Annual gross bonus — fully taxable/NIable; not in sacrifice base
+ * @param {number} [benefitInKindAnnual=0] Annual taxable BIK — increases income tax only (not NI or cash pay)
  * @returns {{
  *   estimatedIncomeTax:   number,
  *   estimatedNI:          number,
  *   sacrificeGross:       number,
  *   personalPensionNet:   number,
+ *   benefitInKindAnnual:  number,
+ *   benefitInKindIncomeTaxImpact: number,
  *   grossTakeHomeAnnual:  number,   // after sacrifice & deductions, before SIPP payment
  *   grossTakeHomeMonthly: number,
  *   netTakeHomeAnnual:    number,   // after SIPP payment too
  *   netTakeHomeMonthly:   number,
  * }}
  */
-export const calculateTakeHome = (grossSalary, employeeSacrificePct, personalPensionNet = 0, taxRegion = 'england') => {
+export const calculateTakeHome = (
+  grossSalary,
+  employeeSacrificePct,
+  personalPensionNet = 0,
+  taxRegion = 'england',
+  bonusIncome = 0,
+  benefitInKindAnnual = 0,
+) => {
   const salary = Number(grossSalary) || 0;
+  const bonus = Math.max(0, Number(bonusIncome) || 0);
   const sacPct = Number(employeeSacrificePct) || 0;
   const ppNet  = Number(personalPensionNet) || 0;
   const region = normalizeTaxRegion(taxRegion);
+  const bik = round2(Math.max(0, Number(benefitInKindAnnual) || 0));
 
   const sacrificeGross = round2((sacPct / 100) * salary);
-  const salaryForTax   = salary - sacrificeGross;
+  const salaryForTax   = round2(salary - sacrificeGross + bonus);
+  const grossForIncomeTax = round2(salaryForTax + bik);
 
-  const [incomeTax, ni] = _incomeTaxAndNI(salaryForTax, region);
+  const [incomeTax, ni] = _incomeTaxAndNI(salaryForTax, region, null, grossForIncomeTax);
+  let benefitInKindIncomeTaxImpact = 0;
+  if (bik > 0) {
+    const [incomeTaxSansBik] = _incomeTaxAndNI(salaryForTax, region, null, salaryForTax);
+    benefitInKindIncomeTaxImpact = round2(incomeTax - incomeTaxSansBik);
+  }
 
-  // Gross take-home: salary after sacrifice, minus IT and NI
+  // Gross take-home: salary after sacrifice, minus IT and NI (BIK is not cash — tax on BIK still deducted)
   const grossTakeHome = round2(salaryForTax - incomeTax - ni);
   // Net take-home: after personal pension net payment
   const netTakeHome   = round2(grossTakeHome - ppNet);
@@ -1166,6 +1242,8 @@ export const calculateTakeHome = (grossSalary, employeeSacrificePct, personalPen
     estimatedNI:          ni,
     sacrificeGross,
     personalPensionNet:   ppNet,
+    benefitInKindAnnual:  bik,
+    benefitInKindIncomeTaxImpact,
     grossTakeHomeAnnual:  grossTakeHome,
     grossTakeHomeMonthly: round2(grossTakeHome / 12),
     netTakeHomeAnnual:    netTakeHome,
@@ -1190,6 +1268,8 @@ export const calculateTakeHome = (grossSalary, employeeSacrificePct, personalPen
  * @param {number} [sharePlanContribution=0] Annual £ into company share plan
  * @param {'pre_tax' | 'post_tax'} [sharePlanType='post_tax']
  * @param {string | null} [studentLoanPlan] Scottish Plan 4: {@link STUDENT_LOAN_PLAN_4}; ignored outside Scotland
+ * @param {number} [bonusIncome=0] Annual gross bonus — in employment/tax/NI/student-loan base; excluded from pension % bases
+ * @param {number} [benefitInKindAnnual=0] Annual taxable BIK — income tax and tax-band display only; not cash, NI, pensions, or student loan
  * @returns {object}
  */
 export const calculateFullPosition = (
@@ -1201,8 +1281,13 @@ export const calculateFullPosition = (
   sharePlanContribution = 0,
   sharePlanType = SHARE_PLAN_TYPES.POST_TAX,
   studentLoanPlan = null,
+  bonusIncome = 0,
+  benefitInKindAnnual = 0,
 ) => {
-  const salary  = Number(grossSalary) || 0;
+  const baseSalary  = Number(grossSalary) || 0;
+  const bonus = Math.max(0, Number(bonusIncome) || 0);
+  const bik = round2(Math.max(0, Number(benefitInKindAnnual) || 0));
+  const employmentGrossIncome = round2(baseSalary + bonus);
   const sacPct  = Number(employeeSacrificePct) || 0;
   const erPct   = Number(employerPercent) || 0;
   const ppNet   = Number(personalPensionNet) || 0;
@@ -1219,25 +1304,48 @@ export const calculateFullPosition = (
     sharePlanOpts.sharePlanType,
   );
 
-  const sacrificeGross = round2((sacPct / 100) * salary);
-  const effectiveSalary = salary - sacrificeGross;
+  const sacrificeGross = round2((sacPct / 100) * baseSalary);
+  const payForTaxNiStudentLoan = round2(employmentGrossIncome - sacrificeGross);
 
-  const pensionBand = calculateDynamicTaxBand(salary, sacrificeGross, ppNet, region, sharePlanOpts);
+  const pensionBand = calculateDynamicTaxBand(
+    employmentGrossIncome,
+    sacrificeGross,
+    ppNet,
+    region,
+    sharePlanOpts,
+    bik,
+  );
   const taxBand = pensionBand.tax_band;
   const marginalIncomeTaxRate = pensionBand.marginalIncomeTaxRate;
 
-  const sacrifice      = calculateSacrificeContribution(salary, sacPct, region);
-  const personalPension = calculatePersonalPensionCost(salary, sacrificeGross, ppNet, region, sharePlanOpts);
-  const allowance      = calculateRemainingAllowance(salary, sacPct, erPct, ppNet);
-  const recommendation = calculateRecommendation(sacPct, erPct, salary, ppNet, region, sharePlanOpts);
-  const takeHomeBase     = calculateTakeHome(salary, sacPct, ppNet, region);
+  const sacrifice      = calculateSacrificeContribution(baseSalary, sacPct, region, bonus, bik);
+  const personalPension = calculatePersonalPensionCost(
+    employmentGrossIncome,
+    sacrificeGross,
+    ppNet,
+    region,
+    sharePlanOpts,
+    bik,
+  );
+  const allowance      = calculateRemainingAllowance(baseSalary, sacPct, erPct, ppNet);
+  const recommendation = calculateRecommendation(
+    sacPct,
+    erPct,
+    baseSalary,
+    ppNet,
+    region,
+    sharePlanOpts,
+    employmentGrossIncome,
+    bik,
+  );
+  const takeHomeBase     = calculateTakeHome(baseSalary, sacPct, ppNet, region, bonus, bik);
   const loanPlan =
     studentLoanPlan === STUDENT_LOAN_PLAN_4 || studentLoanPlan === 'plan_4'
       ? STUDENT_LOAN_PLAN_4
       : null;
   const netIncomeAfterLoan = calculateNetIncome({
     netIncomeBeforeStudentLoan: takeHomeBase.netTakeHomeAnnual,
-    studentLoanIncome: effectiveSalary,
+    studentLoanIncome: payForTaxNiStudentLoan,
     taxRegion: region,
     studentLoanPlan: loanPlan,
   });
@@ -1254,21 +1362,33 @@ export const calculateFullPosition = (
     netIncomeTrace: netIncomeAfterLoan.trace,
   };
 
-  // Employer gross for display
-  const employerGrossAnnual  = round2((erPct / 100) * salary);
+  // Employer gross for display (pensionable base only)
+  const employerGrossAnnual  = round2((erPct / 100) * baseSalary);
   const employerGrossMonthly = round2(employerGrossAnnual / 12);
 
   // Combined totals across all employee + employer contributions
   const totalGrossAnnual  = round2(sacrifice.sacrificeGross + personalPension.grossPension + employerGrossAnnual);
   const totalGrossMonthly = round2(totalGrossAnnual / 12);
-  const ppGrossPct        = salary > 0
-    ? round2((personalPension.grossPension / salary) * 100)
+  const ppGrossPct        = baseSalary > 0
+    ? round2((personalPension.grossPension / baseSalary) * 100)
     : 0;
   const totalCombinedPct  = round2(sacPct + erPct + ppGrossPct);
 
+  const incomeBreakdown = {
+    salary: baseSalary,
+    bonusIncome: bonus,
+    employmentGross: employmentGrossIncome,
+    benefitInKindAnnual: bik,
+  };
+
   return {
     // Input echo
-    grossSalary:          salary,
+    grossSalary:          baseSalary,
+    bonusIncome:          bonus,
+    employmentGrossIncome,
+    benefitInKindAnnual:  bik,
+    benefitInKindIncomeTaxImpact: takeHomeBase.benefitInKindIncomeTaxImpact,
+    incomeBreakdown,
     employeeSacrificePct: sacPct,
     employerPercent:      erPct,
     personalPensionNet:   ppNet,
@@ -1283,6 +1403,8 @@ export const calculateFullPosition = (
 
     pensionBandImpact: {
       adjustedIncome:           pensionBand.adjusted_income,
+      adjustedIncomeBeforeBenefitInKind: pensionBand.adjusted_income_before_bik,
+      benefitInKindAnnual:      pensionBand.benefit_in_kind_annual,
       grossPension:             pensionBand.gross_pension,
       incomeBeforePersonalPension: pensionBand.income_before_personal_pension,
       sharePlanDeductionApplied: pensionBand.share_plan_deduction_applied,

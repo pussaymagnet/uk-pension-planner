@@ -283,11 +283,13 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
         |
         +-- expenditures (p1Amount, p1Total, section subtotals)
         +-- debts -> calculateAmortizingMonthlyPayment, calculateTotalInterest
+        +-- credit cards -> sum of minimum monthly payments only (not amortized; budget-only)
         +-- savings -> savingsTotal
-        +-- p1Remain = netMonthlyIncome - p1Total - debtMonthlyTotal - savingsTotal
+        +-- p1Remain = netMonthlyIncome - p1Total - debtMonthlyTotal - creditCardMinimumTotal - savingsTotal
+        +-- unexpected spending buffer (soft reserve; not in outgoings) -> availableForGoals = max(0, p1Remain - buffer)
 ```
 
-**Persistence side channels** (do not change formulas): `localStorage` mirror; Supabase `pension_inputs`, `budget_expenditures`, `budget_debts`, `budget_savings` when `user` is set.
+**Persistence side channels** (do not change formulas): `localStorage` mirror; Supabase `pension_inputs`, `budget_expenditures`, `budget_debts`, `budget_savings`, `budget_credit_cards`, `budget_settings` (unexpected spending buffer) when `user` is set.
 
 ---
 

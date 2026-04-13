@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sql:new": "node scripts/new-supabase-sql.mjs",
+    "sql:verify": "node scripts/verify-supabase-sql.mjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.1",

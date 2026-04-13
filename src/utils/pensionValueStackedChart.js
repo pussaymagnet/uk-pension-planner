@@ -1,4 +1,5 @@
 import { getPensionBenefitBreakdown } from './calculations.js';
+import { annualAmountForDisplay } from './displayPeriodMoney.js';
 
 const r2 = (n) => Math.round(Number(n) * 100) / 100;
 
@@ -17,25 +18,26 @@ const FREE_MONEY_DETAIL = [
  *
  * @param {object} position — return value of calculateFullPosition
  * @param {object} [existingBreakdown] — if provided, use instead of calling getPensionBenefitBreakdown again
+ * @param {'annual'|'monthly'} [displayPeriod='annual'] — display-only; underlying figures stay annual
  * @returns {{
  *   summary: { label: string, yourMoney: number, freeMoney: number, grandTotal: number }[],
  *   detailed: { label: string, value: number, type: 'your_money' | 'free_money', source_key: string }[],
  * }}
  */
-export function buildPensionValueStackedChartData(position, existingBreakdown = null) {
+export function buildPensionValueStackedChartData(
+  position,
+  existingBreakdown = null,
+  displayPeriod = 'annual',
+) {
   const netPaid = Number(position?.personalPension?.netPaid) || 0;
   const sacrificeGross = Number(position?.sacrifice?.sacrificeGross) || 0;
-  const yourMoney = r2(netPaid + sacrificeGross);
 
   const breakdown =
     existingBreakdown && typeof existingBreakdown === 'object'
       ? existingBreakdown
       : getPensionBenefitBreakdown(position).breakdown;
 
-  const freeMoney = r2(Number(breakdown.total_pension_benefit) || 0);
-  const grandTotal = r2(yourMoney + freeMoney);
-
-  const detailed = [
+  const detailedAnnual = [
     {
       label: 'Personal pension (net)',
       value: r2(netPaid),
@@ -55,6 +57,19 @@ export function buildPensionValueStackedChartData(position, existingBreakdown = 
       source_key,
     })),
   ];
+
+  const detailed = detailedAnnual.map((d) => ({
+    ...d,
+    value: annualAmountForDisplay(d.value, displayPeriod),
+  }));
+
+  const yourMoney = r2(
+    detailed.filter((d) => d.type === 'your_money').reduce((s, d) => s + d.value, 0),
+  );
+  const freeMoney = r2(
+    detailed.filter((d) => d.type === 'free_money').reduce((s, d) => s + d.value, 0),
+  );
+  const grandTotal = r2(yourMoney + freeMoney);
 
   return {
     summary: [

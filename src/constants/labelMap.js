@@ -15,8 +15,17 @@ export const labelMap = {
   hide_detail: 'Hide detail',
   dropped_tax_band: 'Band changed with personal pension',
 
+  // ─── Pension benefit charts (titles composed with withDisplayPeriodLabel) ─
+  chart_your_money_vs_free_money: 'Your money vs free money',
+  chart_where_pension_benefits_from: 'Where your pension benefits come from',
+  chart_your_contribution_detail: 'Your contribution detail',
+  chart_free_money_detail: 'Free money detail',
+
   // ─── Persisted pension_inputs (Supabase) / DEFAULT_INPUTS state ───────────
   gross_salary: 'Gross Salary',
+  bonus_income: 'Bonus (annual gross)',
+  benefit_in_kind_taxable: 'Benefit in Kind (taxable, annual)',
+  benefit_in_kind_tax_impact: 'Extra income tax from benefits (est.)',
   employee_value: 'Employee Pension Contribution',
   employer_value: 'Employer Pension Contribution',
   personal_pension_net: 'Personal Pension (Net Contribution)',
@@ -37,7 +46,7 @@ export const labelMap = {
 
   // ─── App tabs ──────────────────────────────────────────────────────────────
   pension_tab: 'Pension & Pay',
-  budget_tab: 'Household Budget',
+  budget_tab: 'My Household Budget',
 
   // ─── Period suffixes (InputForm higher-band hint, etc.) ─────────────────────
   slash_month: '/month',
