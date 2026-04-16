@@ -48,9 +48,12 @@ export function PlannedSavingsSection({
                           transition-colors duration-200
                           ${flashSavingId === sv.id ? 'bg-emerald-50/60' : 'hover:bg-slate-50/90'}`}
             >
-              <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">
-                {sv.name || 'Saving'}
-              </span>
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-slate-800">{sv.name || 'Saving'}</span>
+                <span className="mt-0.5 block text-[11px] text-slate-500">
+                  {sv.allocationType === 'stocks' ? 'Stocks & shares' : 'Cash'}
+                </span>
+              </div>
               <span className="shrink-0 text-base font-semibold tabular-nums text-slate-900">{fmt(sv.amount)}</span>
               <div className="flex shrink-0 gap-0.5">
                 <button
@@ -130,6 +133,18 @@ export function PlannedSavingsSection({
               {savingsErrors.amount && (
                 <p className="text-xs text-red-500 mt-1">{savingsErrors.amount}</p>
               )}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Save as</label>
+              <select
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                value={savingsFormValues.allocationType === 'stocks' ? 'stocks' : 'cash'}
+                onChange={(e) => handleSavingsFormChange('allocationType', e.target.value)}
+              >
+                <option value="cash">Cash</option>
+                <option value="stocks">Stocks &amp; shares</option>
+              </select>
             </div>
             <div className="flex gap-2 pt-1">
               <button

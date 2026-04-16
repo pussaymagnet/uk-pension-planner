@@ -1186,6 +1186,8 @@ export const calculateNetIncome = ({
  * Estimates net take-home using the correct model for each contribution type:
  *  - Salary sacrifice reduces taxable income → lower IT and NI
  *  - Personal pension is deducted from after-tax take-home
+ *  - Pre-tax share plan: same £ as {@link getSharePlanDeduction} — reduces PAYE cash (IT/NI); no second cash cut
+ *  - Post-tax share plan: reduces net take-home after pension (cash not available)
  *
  * @param {number} grossSalary Pensionable base salary (before sacrifice; sacrifice % applies here only)
  * @param {number} employeeSacrificePct
@@ -1193,6 +1195,7 @@ export const calculateNetIncome = ({
  * @param {'england' | 'scotland'} [taxRegion='england']
  * @param {number} [bonusIncome=0] Annual gross bonus — fully taxable/NIable; not in sacrifice base
  * @param {number} [benefitInKindAnnual=0] Annual taxable BIK — increases income tax only (not NI or cash pay)
+ * @param {SharePlanOptions} [sharePlanOptions={}]
  * @returns {{
  *   estimatedIncomeTax:   number,
  *   estimatedNI:          number,
@@ -1202,8 +1205,12 @@ export const calculateNetIncome = ({
  *   benefitInKindIncomeTaxImpact: number,
  *   grossTakeHomeAnnual:  number,   // after sacrifice & deductions, before SIPP payment
  *   grossTakeHomeMonthly: number,
- *   netTakeHomeAnnual:    number,   // after SIPP payment too
+ *   netTakeHomeAfterPensionAnnual: number,
+ *   netTakeHomeAfterPensionMonthly: number,
+ *   netTakeHomeAnnual:    number,   // after SIPP, post-tax share plan, before student loan
  *   netTakeHomeMonthly:   number,
+ *   sharePlanPreTaxApplied: number,
+ *   sharePlanPostTaxDeducted: number,
  * }}
  */
 export const calculateTakeHome = (
@@ -1213,6 +1220,7 @@ export const calculateTakeHome = (
   taxRegion = 'england',
   bonusIncome = 0,
   benefitInKindAnnual = 0,
+  sharePlanOptions = {},
 ) => {
   const salary = Number(grossSalary) || 0;
   const bonus = Math.max(0, Number(bonusIncome) || 0);
@@ -1221,8 +1229,12 @@ export const calculateTakeHome = (
   const region = normalizeTaxRegion(taxRegion);
   const bik = round2(Math.max(0, Number(benefitInKindAnnual) || 0));
 
+  const sharePlanContribution = Number(sharePlanOptions.sharePlanContribution) || 0;
+  const sharePlanType = sharePlanOptions.sharePlanType ?? SHARE_PLAN_TYPES.POST_TAX;
+  const sharePlanPreTaxApplied = getSharePlanDeduction(sharePlanContribution, sharePlanType);
+
   const sacrificeGross = round2((sacPct / 100) * salary);
-  const salaryForTax   = round2(salary - sacrificeGross + bonus);
+  const salaryForTax   = round2(Math.max(0, salary - sacrificeGross + bonus - sharePlanPreTaxApplied));
   const grossForIncomeTax = round2(salaryForTax + bik);
 
   const [incomeTax, ni] = _incomeTaxAndNI(salaryForTax, region, null, grossForIncomeTax);
@@ -1234,8 +1246,19 @@ export const calculateTakeHome = (
 
   // Gross take-home: salary after sacrifice, minus IT and NI (BIK is not cash — tax on BIK still deducted)
   const grossTakeHome = round2(salaryForTax - incomeTax - ni);
-  // Net take-home: after personal pension net payment
-  const netTakeHome   = round2(grossTakeHome - ppNet);
+  // After personal pension net payment (before post-tax share plan)
+  const netTakeHomeAfterPensionAnnual = round2(grossTakeHome - ppNet);
+  const netTakeHomeAfterPensionMonthly = round2(netTakeHomeAfterPensionAnnual / 12);
+
+  const isPostTaxShare =
+    sharePlanType === SHARE_PLAN_TYPES.POST_TAX || sharePlanType === 'post_tax';
+  const sharePlanPostTaxDeducted = isPostTaxShare
+    ? round2(Math.max(0, sharePlanContribution))
+    : 0;
+  let netTakeHome = netTakeHomeAfterPensionAnnual;
+  if (sharePlanPostTaxDeducted > 0) {
+    netTakeHome = Math.max(0, round2(netTakeHome - sharePlanPostTaxDeducted));
+  }
 
   return {
     estimatedIncomeTax:   incomeTax,
@@ -1246,8 +1269,12 @@ export const calculateTakeHome = (
     benefitInKindIncomeTaxImpact,
     grossTakeHomeAnnual:  grossTakeHome,
     grossTakeHomeMonthly: round2(grossTakeHome / 12),
+    netTakeHomeAfterPensionAnnual,
+    netTakeHomeAfterPensionMonthly,
     netTakeHomeAnnual:    netTakeHome,
     netTakeHomeMonthly:   round2(netTakeHome / 12),
+    sharePlanPreTaxApplied,
+    sharePlanPostTaxDeducted,
   };
 };
 
@@ -1305,7 +1332,7 @@ export const calculateFullPosition = (
   );
 
   const sacrificeGross = round2((sacPct / 100) * baseSalary);
-  const payForTaxNiStudentLoan = round2(employmentGrossIncome - sacrificeGross);
+  const payForTaxNiStudentLoan = round2(employmentGrossIncome - sacrificeGross - sharePlanDeductionApplied);
 
   const pensionBand = calculateDynamicTaxBand(
     employmentGrossIncome,
@@ -1338,7 +1365,7 @@ export const calculateFullPosition = (
     employmentGrossIncome,
     bik,
   );
-  const takeHomeBase     = calculateTakeHome(baseSalary, sacPct, ppNet, region, bonus, bik);
+  const takeHomeBase     = calculateTakeHome(baseSalary, sacPct, ppNet, region, bonus, bik, sharePlanOpts);
   const loanPlan =
     studentLoanPlan === STUDENT_LOAN_PLAN_4 || studentLoanPlan === 'plan_4'
       ? STUDENT_LOAN_PLAN_4
@@ -1351,8 +1378,8 @@ export const calculateFullPosition = (
   });
   const takeHome = {
     ...takeHomeBase,
-    netTakeHomeAfterPensionAnnual: takeHomeBase.netTakeHomeAnnual,
-    netTakeHomeAfterPensionMonthly: takeHomeBase.netTakeHomeMonthly,
+    netTakeHomeAfterPensionAnnual: takeHomeBase.netTakeHomeAfterPensionAnnual,
+    netTakeHomeAfterPensionMonthly: takeHomeBase.netTakeHomeAfterPensionMonthly,
     studentLoanPlan: netIncomeAfterLoan.student_loan_plan,
     studentLoanRepaymentAnnual: netIncomeAfterLoan.student_loan_repayment,
     repaymentThresholdUsed: netIncomeAfterLoan.repayment_threshold_used,

@@ -3,7 +3,9 @@
   "scripts": [
     { "path": "budget/budget_debts.sql", "status": "applied", "note": "Household Budget: loan/debt rows" },
     { "path": "budget/budget_expenditures_section.sql", "status": "applied", "note": "section column on budget_expenditures" },
+    { "path": "budget/budget_expenditures_category.sql", "status": "applied", "note": "category + metadata on budget_expenditures" },
     { "path": "budget/budget_savings.sql", "status": "applied", "note": "budget_savings table" },
+    { "path": "budget/budget_savings_allocation_type.sql", "status": "applied", "note": "allocation_type on budget_savings (Projection routing)" },
     { "path": "budget/budget_credit_cards.sql", "status": "applied", "note": "budget_credit_cards table" },
     { "path": "budget/budget_settings.sql", "status": "applied", "note": "budget_settings (unexpected buffer)" },
     { "path": "budget/budget_goal_savings.sql", "status": "applied", "note": "budget_goal_savings table" },
@@ -12,6 +14,8 @@
     { "path": "pension/pension_inputs_bonus_income.sql", "status": "applied", "note": "bonus income columns" },
     { "path": "pension/pension_inputs_share_plan.sql", "status": "applied", "note": "share plan columns" },
     { "path": "pension/pension_inputs_student_loan.sql", "status": "applied", "note": "student loan columns" },
-    { "path": "pension/pension_inputs_benefit_in_kind.sql", "status": "applied", "note": "benefit_in_kind_taxable on pension_inputs" }
+    { "path": "pension/pension_inputs_benefit_in_kind.sql", "status": "applied", "note": "benefit_in_kind_taxable on pension_inputs" },
+    { "path": "net_worth/net_worth_inputs.sql", "status": "Applied", "note": "Net Worth signed-in sync (canonical inputs JSON + last_updated_at_ms)" },
+    { "path": "projection/projection_inputs.sql", "status": "Applied", "note": "Projection tab signed-in sync (assumption inputs JSON)" }
   ]
 }

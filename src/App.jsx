@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   calculateFullPosition,
   getPensionBenefitBreakdown,
@@ -10,14 +10,44 @@ import { buildPensionBenefitChartData } from './utils/pensionBenefitChart';
 import { buildPensionValueStackedChartData } from './utils/pensionValueStackedChart';
 import { normalizeTaxRegion } from './data/taxRules';
 import InputForm from './components/InputForm';
-import PensionTaxPanel from './components/PensionTaxPanel';
+import PensionTaxPanel from './features/pension/components/PensionTaxPanel';
 import PensionBenefitBarChart from './components/PensionBenefitBarChart';
 import PensionValueStackedBarChart from './components/PensionValueStackedBarChart';
 import BudgetFeature from './features/budget/BudgetFeature';
+import NetWorthTab from './components/NetWorthTab';
+import ProjectionTab from './components/ProjectionTab';
 import AuthModal from './components/AuthModal';
 import { useUser } from './hooks/useUser';
 import { supabase } from './lib/supabase';
 import { getLabel } from './utils/fieldLabels';
+import {
+  clearBudgetLocalStorageForSignOut,
+  readEssentialMonthlyCostsFromBudgetMirror,
+  readMonthlySavingsFromBudgetMirror,
+  readMonthlyCashSavingsFromBudgetMirror,
+  readMonthlyStockSavingsFromBudgetMirror,
+  readMortgageSummaryFromBudgetMirror,
+} from './features/budget/domain/plannedMonthlyOutgoings';
+import { computeNetWorthSummary, computeNetWorthInsights, safeMoney } from './utils/netWorthSummary';
+import { computeProjectionSeries } from './utils/projectionSummary';
+import {
+  loadProjectionInputsFromStorage,
+  normalizeProjectionInputs,
+  STORAGE_KEY_PROJECTION,
+} from './utils/projectionDefaults';
+import {
+  getDefaultNetWorthInputs,
+  normalizeNetWorthInputs,
+  parseNetWorthImportJsonText,
+} from './utils/netWorthStorage';
+import { netWorthLocalPersistenceAdapter } from './utils/netWorthPersistenceAdapter';
+import {
+  deriveNetWorthStorageStatus,
+  isSupabaseEnvConfiguredForNetWorth,
+  labelKeyForNetWorthStorageStatus,
+} from './utils/netWorthPersistenceStatus';
+import { fetchNetWorthBundleForUser, upsertNetWorthBundleForUser } from './utils/netWorthSupabase';
+import { fetchProjectionInputsForUser, upsertProjectionInputsForUser } from './utils/projectionSupabase';
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
@@ -94,10 +124,239 @@ export default function App() {
   const [taxRegion, setTaxRegion]           = useState('england');
   const [activeTab, setActiveTab]           = useState('pension');
   const [showAuthModal, setShowAuthModal]   = useState(false);
+  const [projectionInputs, setProjectionInputs] = useState(() => loadProjectionInputsFromStorage());
+  /** When this matches `user.id`, remote row has been loaded (or attempt finished); enables debounced cloud upsert. */
+  const [projectionLoadedForUserId, setProjectionLoadedForUserId] = useState(null);
+  const [projectionRemoteFetchFailed, setProjectionRemoteFetchFailed] = useState(false);
+  const [projectionRemoteUpsertFailed, setProjectionRemoteUpsertFailed] = useState(false);
+
+  // Net Worth — canonical `netWorthInputs`, `lastUpdatedAtMs` metadata, tab-only `netWorthImportError`.
+  // Derived: `netWorthSummary` / `netWorthInsights`. Device mirror: `netWorthLocalPersistenceAdapter`.
+  // Signed-in: `net_worth_inputs` via `fetchNetWorthBundleForUser` / debounced `upsertNetWorthBundleForUser`.
+  // Persistence UI status: `deriveNetWorthStorageStatus` (not inputs, not summary maths).
+  const netWorthInitial = useMemo(() => netWorthLocalPersistenceAdapter.load(), []);
+  const [netWorthInputs, setNetWorthInputs] = useState(() => netWorthInitial.inputs);
+  const [netWorthLastUpdatedAtMs, setNetWorthLastUpdatedAtMs] = useState(
+    () => netWorthInitial.lastUpdatedAtMs,
+  );
+  const [netWorthImportError, setNetWorthImportError] = useState(null);
+  /** When this matches `user.id`, remote row has been loaded (or attempt finished); enables debounced cloud upsert. */
+  const [netWorthLoadedForUserId, setNetWorthLoadedForUserId] = useState(null);
+  const [netWorthRemoteFetchFailed, setNetWorthRemoteFetchFailed] = useState(false);
+  const [netWorthRemoteUpsertFailed, setNetWorthRemoteUpsertFailed] = useState(false);
+
+  /** Budget mirror mortgage liability for Net Worth (single source; not from `netWorthInputs.liabilities.mortgageBalance`). */
+  const derivedMortgageBalance = useMemo(() => {
+    const m = readMortgageSummaryFromBudgetMirror();
+    if (!m.enabled) return 0;
+    return safeMoney(m.totalBalance);
+  }, [activeTab, netWorthInputs]);
+
+  const netWorthSummary = useMemo(
+    () => computeNetWorthSummary(netWorthInputs.assets, netWorthInputs.liabilities, derivedMortgageBalance),
+    [netWorthInputs.assets, netWorthInputs.liabilities, derivedMortgageBalance],
+  );
+
+  const essentialMonthlyCosts = useMemo(
+    () => readEssentialMonthlyCostsFromBudgetMirror(),
+    [activeTab, netWorthInputs],
+  );
+
+  const monthlyBudgetSavings = useMemo(
+    () => readMonthlySavingsFromBudgetMirror(),
+    [activeTab, netWorthInputs],
+  );
+
+  const monthlyCashBudgetSavings = useMemo(
+    () => readMonthlyCashSavingsFromBudgetMirror(),
+    [activeTab, netWorthInputs],
+  );
+
+  const monthlyStockBudgetSavings = useMemo(
+    () => readMonthlyStockSavingsFromBudgetMirror(),
+    [activeTab, netWorthInputs],
+  );
+
+  const netWorthInsights = useMemo(
+    () =>
+      computeNetWorthInsights(netWorthInputs.assets, netWorthInputs.liabilities, {
+        essentialMonthlyCosts,
+        derivedMortgageBalance,
+      }),
+    [netWorthInputs.assets, netWorthInputs.liabilities, essentialMonthlyCosts, derivedMortgageBalance],
+  );
+
+  const netWorthPersistenceStatusLabel = useMemo(() => {
+    const status = deriveNetWorthStorageStatus({
+      hasUser: Boolean(user),
+      supabaseConfigured: isSupabaseEnvConfiguredForNetWorth(),
+      remoteLoadReady: Boolean(user && netWorthLoadedForUserId === user.id),
+      remoteFetchFailed: netWorthRemoteFetchFailed,
+      remoteUpsertFailed: netWorthRemoteUpsertFailed,
+    });
+    return getLabel(labelKeyForNetWorthStorageStatus(status));
+  }, [
+    user,
+    netWorthLoadedForUserId,
+    netWorthRemoteFetchFailed,
+    netWorthRemoteUpsertFailed,
+  ]);
+
+  const projectionPersistenceStatusLabel = useMemo(() => {
+    const status = deriveNetWorthStorageStatus({
+      hasUser: Boolean(user),
+      supabaseConfigured: isSupabaseEnvConfiguredForNetWorth(),
+      remoteLoadReady: Boolean(user && projectionLoadedForUserId === user.id),
+      remoteFetchFailed: projectionRemoteFetchFailed,
+      remoteUpsertFailed: projectionRemoteUpsertFailed,
+    });
+    return getLabel(labelKeyForNetWorthStorageStatus(status));
+  }, [
+    user,
+    projectionLoadedForUserId,
+    projectionRemoteFetchFailed,
+    projectionRemoteUpsertFailed,
+  ]);
+
+  const handleNetWorthAssetChange = useCallback((assetKey, committed) => {
+    const value = safeMoney(committed);
+    setNetWorthLastUpdatedAtMs(Date.now());
+    setNetWorthInputs((prev) => ({
+      ...prev,
+      assets: { ...prev.assets, [assetKey]: value },
+    }));
+  }, []);
+
+  const handleNetWorthLiabilityChange = useCallback((liabilityKey, committed) => {
+    if (liabilityKey === 'mortgageBalance') return;
+    const value = safeMoney(committed);
+    setNetWorthLastUpdatedAtMs(Date.now());
+    setNetWorthInputs((prev) => ({
+      ...prev,
+      liabilities: { ...prev.liabilities, [liabilityKey]: value },
+    }));
+  }, []);
+
+  const handleResetNetWorth = useCallback(() => {
+    setNetWorthImportError(null);
+    setNetWorthRemoteFetchFailed(false);
+    setNetWorthRemoteUpsertFailed(false);
+    setNetWorthLastUpdatedAtMs(Date.now());
+    setNetWorthInputs(getDefaultNetWorthInputs());
+  }, []);
+
+  const handleExportNetWorth = useCallback(() => {
+    setNetWorthImportError(null);
+    const json = JSON.stringify(netWorthInputs, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'net-worth.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [netWorthInputs]);
+
+  const handleImportNetWorthFile = useCallback(async (file) => {
+    setNetWorthImportError(null);
+    try {
+      const text = await file.text();
+      const parsed = parseNetWorthImportJsonText(text);
+      if (parsed === null) {
+        setNetWorthImportError(getLabel('net_worth_import_error'));
+        return;
+      }
+      setNetWorthLastUpdatedAtMs(Date.now());
+      setNetWorthInputs(normalizeNetWorthInputs(parsed));
+    } catch {
+      setNetWorthImportError(getLabel('net_worth_import_error'));
+    }
+  }, []);
+
+  // Latest signed-in user id — used to ignore stale Net Worth fetch results if the account changes.
+  const userRef = useRef(user);
+  userRef.current = user;
 
   // Track whether we have already loaded saved inputs for the current user
   // so we don't overwrite them when the debounce save fires after load.
   const loadedForUser = useRef(null);
+
+  // ── Net worth: Supabase row when signed in; `localStorage` mirror on sign-out (same as pension tab pattern)
+  useEffect(() => {
+    if (!user) {
+      setNetWorthLoadedForUserId(null);
+      setNetWorthRemoteFetchFailed(false);
+      setNetWorthRemoteUpsertFailed(false);
+      try {
+        const local = netWorthLocalPersistenceAdapter.load();
+        setNetWorthInputs(local.inputs);
+        setNetWorthLastUpdatedAtMs(local.lastUpdatedAtMs);
+      } catch {
+        // ignore corrupt device data
+      }
+      return;
+    }
+    if (netWorthLoadedForUserId === user.id) return;
+
+    const uid = user.id;
+    fetchNetWorthBundleForUser(uid)
+      .then((result) => {
+        if (userRef.current?.id !== uid) return;
+        if (!result.ok) {
+          setNetWorthRemoteFetchFailed(true);
+          setNetWorthLoadedForUserId(uid);
+          return;
+        }
+        setNetWorthRemoteFetchFailed(false);
+        if (result.bundle != null) {
+          setNetWorthInputs(result.bundle.inputs);
+          setNetWorthLastUpdatedAtMs(result.bundle.lastUpdatedAtMs);
+        }
+        setNetWorthLoadedForUserId(uid);
+      })
+      .catch(() => {
+        if (userRef.current?.id !== uid) return;
+        setNetWorthRemoteFetchFailed(true);
+        setNetWorthLoadedForUserId(uid);
+      });
+  }, [user, netWorthLoadedForUserId]);
+
+  // ── Projection inputs: Supabase row when signed in; `localStorage` mirror always (same as Net Worth)
+  useEffect(() => {
+    if (!user) {
+      setProjectionLoadedForUserId(null);
+      setProjectionRemoteFetchFailed(false);
+      setProjectionRemoteUpsertFailed(false);
+      try {
+        setProjectionInputs(loadProjectionInputsFromStorage());
+      } catch {
+        // ignore corrupt device data
+      }
+      return;
+    }
+    if (projectionLoadedForUserId === user.id) return;
+
+    const uid = user.id;
+    fetchProjectionInputsForUser(uid)
+      .then((result) => {
+        if (userRef.current?.id !== uid) return;
+        if (!result.ok) {
+          setProjectionRemoteFetchFailed(true);
+          setProjectionLoadedForUserId(uid);
+          return;
+        }
+        setProjectionRemoteFetchFailed(false);
+        if (result.bundle != null) {
+          setProjectionInputs(result.bundle.inputs);
+        }
+        setProjectionLoadedForUserId(uid);
+      })
+      .catch(() => {
+        if (userRef.current?.id !== uid) return;
+        setProjectionRemoteFetchFailed(true);
+        setProjectionLoadedForUserId(uid);
+      });
+  }, [user, projectionLoadedForUserId]);
 
   // ── Load pension inputs from Supabase when the user signs in ─────────────
   useEffect(() => {
@@ -162,6 +421,8 @@ export default function App() {
 
   // ── Debounce-save pension inputs to Supabase when logged in ──────────────
   const debounceTimer = useRef(null);
+  const netWorthDebounceTimer = useRef(null);
+  const projectionDebounceTimer = useRef(null);
   useEffect(() => {
     // Don't save until we've loaded the existing data (avoids overwriting with blanks)
     if (!user || loadedForUser.current !== user.id) return;
@@ -208,6 +469,58 @@ export default function App() {
       taxRegion,
     }));
   }, [inputs, contributionMode, displayPeriod, taxRegion]);
+
+  // ── Mirror net worth bundle to localStorage (always; offline / Supabase failure fallback) ─
+  useEffect(() => {
+    netWorthLocalPersistenceAdapter.save({
+      inputs: netWorthInputs,
+      lastUpdatedAtMs: netWorthLastUpdatedAtMs,
+    });
+  }, [netWorthInputs, netWorthLastUpdatedAtMs]);
+
+  // ── Mirror projection inputs to localStorage (always; offline fallback; cloud when signed in via debounced upsert)
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_PROJECTION, JSON.stringify(projectionInputs));
+    } catch {
+      // ignore quota / private mode
+    }
+  }, [projectionInputs]);
+
+  // ── Debounced Net Worth upsert to Supabase (only after remote load attempt finished for this user)
+  useEffect(() => {
+    if (!user || netWorthLoadedForUserId !== user.id) return;
+
+    clearTimeout(netWorthDebounceTimer.current);
+    netWorthDebounceTimer.current = setTimeout(() => {
+      const uid = user.id;
+      void upsertNetWorthBundleForUser(uid, {
+        inputs: netWorthInputs,
+        lastUpdatedAtMs: netWorthLastUpdatedAtMs,
+      }).then((result) => {
+        if (userRef.current?.id !== uid) return;
+        setNetWorthRemoteUpsertFailed(!result.ok);
+      });
+    }, 1000);
+
+    return () => clearTimeout(netWorthDebounceTimer.current);
+  }, [netWorthInputs, netWorthLastUpdatedAtMs, user, netWorthLoadedForUserId]);
+
+  // ── Debounced Projection inputs upsert to Supabase (only after remote load attempt finished for this user)
+  useEffect(() => {
+    if (!user || projectionLoadedForUserId !== user.id) return;
+
+    clearTimeout(projectionDebounceTimer.current);
+    projectionDebounceTimer.current = setTimeout(() => {
+      const uid = user.id;
+      void upsertProjectionInputsForUser(uid, projectionInputs).then((result) => {
+        if (userRef.current?.id !== uid) return;
+        setProjectionRemoteUpsertFailed(!result.ok);
+      });
+    }, 1000);
+
+    return () => clearTimeout(projectionDebounceTimer.current);
+  }, [projectionInputs, user, projectionLoadedForUserId]);
 
   // ── Input handlers ────────────────────────────────────────────────────────
   const handleChange = (field, value) => {
@@ -284,18 +597,55 @@ export default function App() {
 
   const netMonthlyIncome = position.takeHome?.netTakeHomeMonthly ?? 0;
 
+  const projectionSnapshot = useMemo(
+    () => ({
+      pensionHoldings: safeMoney(netWorthInputs.assets?.pensionHoldings),
+      stocksAndShares: safeMoney(netWorthInputs.assets?.stocksAndShares),
+      cash: safeMoney(netWorthInputs.assets?.cash),
+      propertyValue: safeMoney(netWorthInputs.assets?.propertyValue),
+      totalLiabilities: netWorthSummary.totalLiabilities,
+      liabilityBreakdown: {
+        mortgageBalance: derivedMortgageBalance,
+        loans: safeMoney(netWorthInputs.liabilities?.loans),
+        creditCards: safeMoney(netWorthInputs.liabilities?.creditCards),
+      },
+      mortgageFromBudget: readMortgageSummaryFromBudgetMirror(),
+      annualPensionContribution: Number(position.totalGrossAnnual) || 0,
+      monthlyBudgetSavings,
+      monthlyCashSavings: monthlyCashBudgetSavings,
+      monthlyStockSavings: monthlyStockBudgetSavings,
+    }),
+    [
+      netWorthInputs,
+      netWorthSummary.totalLiabilities,
+      derivedMortgageBalance,
+      position.totalGrossAnnual,
+      monthlyBudgetSavings,
+      monthlyCashBudgetSavings,
+      monthlyStockBudgetSavings,
+      activeTab,
+    ],
+  );
+
+  const projectionResult = useMemo(
+    () => computeProjectionSeries(projectionInputs, projectionSnapshot),
+    [projectionInputs, projectionSnapshot],
+  );
+
+  const handleProjectionChange = useCallback((field, value) => {
+    setProjectionInputs((prev) => normalizeProjectionInputs({ ...prev, [field]: value }));
+  }, []);
+
   // ── Sign out ──────────────────────────────────────────────────────────────
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     localStorage.removeItem(STORAGE_KEY_PENSION);
-    localStorage.removeItem('pension-planner-budget');
-    localStorage.removeItem('pension-planner-budget-debts');
-    localStorage.removeItem('pension-planner-budget-savings');
-    localStorage.removeItem('pension-planner-budget-credit-cards');
-    localStorage.removeItem('pension-planner-budget-unexpected-buffer');
+    localStorage.removeItem(STORAGE_KEY_PROJECTION);
+    clearBudgetLocalStorageForSignOut();
     setInputs(DEFAULT_INPUTS);
     setTaxRegion('england');
     loadedForUser.current = null;
+    setProjectionLoadedForUserId(null);
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -368,8 +718,10 @@ export default function App() {
           {/* Tab bar */}
           <nav className="flex gap-1 -mb-px">
             {[
-              { id: 'pension', labelKey: 'pension_tab' },
-              { id: 'budget',  labelKey: 'budget_tab' },
+              { id: 'pension',   labelKey: 'pension_tab' },
+              { id: 'budget',    labelKey: 'budget_tab' },
+              { id: 'networth',  labelKey: 'net_worth_tab' },
+              { id: 'projection', labelKey: 'projection_tab' },
             ].map(({ id, labelKey }) => (
               <button
                 key={id}
@@ -453,6 +805,39 @@ export default function App() {
         {/* Budget tab — always mounted */}
         <div className={activeTab === 'budget' ? '' : 'hidden'}>
           <BudgetFeature netMonthlyIncome={netMonthlyIncome} user={user} />
+        </div>
+
+        {/* Net Worth tab — always mounted */}
+        <div className={activeTab === 'networth' ? '' : 'hidden'}>
+          <NetWorthTab
+            netWorthInputs={netWorthInputs}
+            derivedMortgageBalance={derivedMortgageBalance}
+            onNetWorthAssetChange={handleNetWorthAssetChange}
+            onNetWorthLiabilityChange={handleNetWorthLiabilityChange}
+            onResetNetWorth={handleResetNetWorth}
+            onExportNetWorth={handleExportNetWorth}
+            onImportNetWorthFile={handleImportNetWorthFile}
+            importError={netWorthImportError}
+            lastUpdatedAtMs={netWorthLastUpdatedAtMs}
+            persistenceStatusLabel={netWorthPersistenceStatusLabel}
+            summary={netWorthSummary}
+            insights={netWorthInsights}
+          />
+        </div>
+
+        <div className={activeTab === 'projection' ? '' : 'hidden'}>
+          <ProjectionTab
+            projectionInputs={projectionInputs}
+            onProjectionChange={handleProjectionChange}
+            persistenceStatusLabel={projectionPersistenceStatusLabel}
+            baseline={{
+              annualPensionContribution: projectionSnapshot.annualPensionContribution,
+              monthlyBudgetSavings: projectionSnapshot.monthlyBudgetSavings,
+              monthlyCashSavings: projectionSnapshot.monthlyCashSavings,
+              monthlyStockSavings: projectionSnapshot.monthlyStockSavings,
+            }}
+            projectionResult={projectionResult}
+          />
         </div>
 
       </main>

@@ -106,10 +106,11 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 1. `getSharePlanDeduction(contribution, type)`: if `pre_tax`, `round2(max(0, contribution))`; if `post_tax`, `0`.
 2. Fed into `calculateDynamicTaxBand`, `calculateAdjustedIncomeAndPension` (higher-rate guide), and `calculateSelfAssessmentRelief` via `calculateFullPosition` so tax band, pension threshold guide, and SA relief stay consistent.
 3. `calculateAdjustedIncomeParts` (pure helper) documents the deduction list: salary sacrifice, gross pension, share plan (pre-tax only); `adjusted_income = gross − sum(deductions)` (min 0).
+4. **`calculateTakeHome`** (via `calculateFullPosition`): **pre-tax** share plan reduces PAYE cash for IT/NI (`salaryForTax = max(0, salary − sacrifice + bonus − pre_tax_share)`). **Post-tax** share plan does not change IT/NI; the annual contribution is subtracted from net take-home after relief-at-source personal pension (`sharePlanPostTaxDeducted`). `payForTaxNiStudentLoan` = `employmentGrossIncome − sacrificeGross − share_plan_deduction_applied` (Plan 4 repayment band).
 
 **FORMULA**: `share_plan_deduction_applied = pre_tax ? contribution : 0`; `updated_adjusted_income` is the same figure as `pensionBandImpact.adjustedIncome` / `position.updatedAdjustedIncome`.
 
-**VARIABLES**: `position.sharePlanContribution`, `sharePlanType`, `sharePlanDeductionApplied`, `updatedAdjustedIncome`; `pensionBandImpact.incomeBeforePersonalPension`, `sharePlanDeductionApplied`.
+**VARIABLES**: `position.sharePlanContribution`, `sharePlanType`, `sharePlanDeductionApplied`, `updatedAdjustedIncome`; `pensionBandImpact.incomeBeforePersonalPension`, `sharePlanDeductionApplied`; `position.takeHome.sharePlanPreTaxApplied`, `sharePlanPostTaxDeducted`.
 
 ---
 
@@ -170,33 +171,55 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 ## FEATURE: Estimated take-home pay (`position.takeHome`, `PensionTaxPanel`)
 
-**SOURCE**: `position.takeHome` from `calculateTakeHome` (`src/utils/calculations.js`).
+**SOURCE**: `position.takeHome` from `calculateTakeHome` (`src/utils/calculations.js`), called inside `calculateFullPosition` with `sharePlanOptions`.
 
 **FLOW**:
 
-1. `sacrificeGross = round((sacPct/100)*salary)`; `salaryForTax = salary - sacrificeGross`.
-2. `[incomeTax, ni] = _incomeTaxAndNI(salaryForTax, region)`.
-3. `grossTakeHome = round(salaryForTax - incomeTax - ni)`; `netTakeHome = round(grossTakeHome - ppNet)`; monthly = annual / 12.
+1. `sacrificeGross = round((sacPct/100)*salary)`; optional **pre-tax** share: `sharePlanPreTaxApplied = getSharePlanDeduction(...)`; `salaryForTax = max(0, salary − sacrificeGross + bonus − sharePlanPreTaxApplied)`.
+2. `[incomeTax, ni] = _incomeTaxAndNI(salaryForTax, region, null, salaryForTax + bik)` (BIK unchanged).
+3. `grossTakeHome = round(salaryForTax - incomeTax - ni)`; `netTakeHomeAfterPension = round(grossTakeHome - ppNet)`; if **post-tax** share plan, `netTakeHome = max(0, netTakeHomeAfterPension - contribution)` else `netTakeHome = netTakeHomeAfterPension`; monthly = annual / 12.
 
-**FORMULA**: Net after all pension = take-home after tax/NI on reduced salary, minus **net** personal pension payment (salary sacrifice already embedded in tax/NI).
+**FORMULA**: Net cash after pension and (if post-tax) share plan = take-home after tax/NI on PAYE cash, minus **net** personal pension, minus post-tax share plan. Pre-tax share is only in the PAYE base, not deducted again from net.
 
-**VARIABLES**: `estimatedIncomeTax`, `estimatedNI`, `grossTakeHomeAnnual`/`Monthly`, `netTakeHomeAnnual`/`Monthly`, `sacrificeGross`, `personalPensionNet`.
+**VARIABLES**: `estimatedIncomeTax`, `estimatedNI`, `grossTakeHomeAnnual`/`Monthly`, `netTakeHomeAfterPensionAnnual`/`Monthly`, `netTakeHomeAnnual`/`Monthly`, `sacrificeGross`, `personalPensionNet`, `sharePlanPreTaxApplied`, `sharePlanPostTaxDeducted`.
 
-**Scottish Plan 4 student loan** (when enabled): repayment uses `student_loan_income = gross_salary − salary_sacrifice` (same PAYE gross as tax/NI), not contract gross and not reduced by relief-at-source personal pension. Applied after net take-home from the steps above via `calculateNetIncome`.
+**Scottish Plan 4 student loan** (when enabled): `student_loan_income = employmentGrossIncome − salary_sacrifice − pre_tax_share_deduction` (same PAYE gross stack as tax/NI for pre-tax share). Not reduced by relief-at-source personal pension. Applied after that net take-home via `calculateNetIncome`.
 
 ---
 
 ## FEATURE: Budget tab — net monthly income (right column)
 
-**SOURCE**: `netMonthlyIncome` prop from `App.jsx`: `position.takeHome?.netTakeHomeMonthly ?? 0`.
+**SOURCE**: `netMonthlyIncome` prop from `App.jsx`: `position.takeHome?.netTakeHomeMonthly ?? 0` (after tax, NI, personal pension, post-tax share plan if any, and Scottish Plan 4 student loan when applicable).
 
-**FLOW**: Same as take-home monthly above.
+**FLOW**: Same as take-home monthly above — Budget has no separate share-plan field; it inherits the reduced figure from Pension.
 
 ---
 
-## FEATURE: Budget — expenditure rows and subtotals (`BudgetTab`)
+## FEATURE: Budget cross-tab mirror (canonical adapter)
 
-**SOURCE**: `expenditures[]` from state; loaded from Supabase `budget_expenditures` or `localStorage` key `pension-planner-budget`; defaults from `createDefaultExpenditures` (`src/components/budgetConstants.js`).
+**Purpose**: Other tabs (Net Worth insights, Projection snapshot in `App.jsx`) need **derived** Budget numbers without importing Budget state or parsing row-level storage. That contract is a single JSON blob in `localStorage` and a small API in `src/features/budget/domain/plannedMonthlyOutgoings.js`.
+
+**Canonical key**: `pension-planner-budget-mirror` (`BUDGET_MIRROR_STORAGE_KEY`). The stored object is versioned (v1), includes `generatedAt`, top-level `essentialMonthlyCosts` and `monthlySavings`, and a `breakdown` of partner-weighted household totals, debt/card minimums, savings lines, committed goals, and `plannedMonthlyOutgoings` (same definition as the Budget summary “total planned outgoings”).
+
+**Write path**: `BudgetProvider` (`src/features/budget/hooks/BudgetProvider.jsx`) calls `syncBudgetMirrorToStorage(expenditures, debts, savings, creditCards, goalSavings)` whenever those slices change, after cloud load has finished for signed-in users (see provider guard). Feature-internal rows still persist under separate `localStorage` keys (`src/features/budget/persistence/keys.js`) — those are **Budget-internal** persistence, not the cross-tab contract.
+
+**Read path (only supported API for non-Budget code)**:
+
+- `readBudgetMirror()` — full normalized object; falls back to migration from legacy row keys if the canonical blob is missing or invalid.
+- `readEssentialMonthlyCostsFromBudgetMirror()` — Partner 1 share of **fixed** household lines only (for Net Worth insights).
+- `readMonthlySavingsFromBudgetMirror()` — explicit savings lines + committed goal contributions (for Projection).
+- `readPlannedMonthlyOutgoingsFromBudgetMirror()` — full planned-outgoings total.
+- `readMortgageSummaryFromBudgetMirror()` — normalized `housing_mortgage` rows + totals; **App** passes `derivedMortgageBalance` into `computeNetWorthSummary`. Persisted Net Worth JSON has **no** `mortgageBalance` (legacy values are stripped on load in `netWorthStorage.js`).
+
+**Sign-out**: `clearBudgetLocalStorageForSignOut()` (same module) removes every Budget device key, including the canonical mirror and row mirrors, so the shell does not hardcode key strings.
+
+**Legacy / migration**: If the canonical mirror is absent, the adapter rebuilds from the same legacy row keys the provider uses, then **defers** `writeBudgetMirror` via `queueMicrotask` so the next read usually hits the canonical JSON.
+
+---
+
+## FEATURE: Budget — expenditure rows and subtotals (`BudgetProvider`)
+
+**SOURCE**: `expenditures[]` from state; loaded from Supabase `budget_expenditures` or `localStorage` (feature-internal mirror); defaults from `createDefaultExpenditures` (`src/features/budget/domain/expenditures.js`).
 
 **FLOW**:
 
@@ -210,7 +233,7 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 ---
 
-## FEATURE: Budget — debt monthly payment and interest over term (`BudgetTab` + `debt.js`)
+## FEATURE: Budget — debt monthly payment and interest over term (`BudgetProvider` + `debt.js`)
 
 **SOURCE**: `debts[]` with `principal`, `annualRatePct`, `termMonths`.
 
@@ -226,7 +249,7 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 ---
 
-## FEATURE: Budget — monthly savings total (`BudgetTab`)
+## FEATURE: Budget — monthly savings total (`BudgetProvider`)
 
 **SOURCE**: `savings[]` with `amount` per line.
 
@@ -234,12 +257,12 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 
 ---
 
-## FEATURE: Budget — committed total and remaining (`BudgetTab`)
+## FEATURE: Budget — committed total and remaining (`BudgetProvider`)
 
 **FLOW**:
 
-1. `p1CommittedTotal = round(p1Total + debtMonthlyTotal + savingsTotal)`.
-2. `p1Remain = round(netMonthlyIncome - p1Total - debtMonthlyTotal - savingsTotal)`.
+1. `computePlannedMonthlyOutgoings` (`plannedMonthlyOutgoings.js`) matches `p1CommittedTotal`: Partner 1 household share + amortising debt payments + monthly savings (explicit + committed goals) + credit card minimums; **not** the optional unexpected buffer.
+2. `p1Remain = round(netMonthlyIncome - p1Total - debtMonthlyTotal - savingsTotal - creditCardMinimumTotal)` (with savings including committed goals as in code).
 
 **FORMULA**: Remaining = net monthly income from pension planner minus Partner 1 share of bills, total debt payments, and total monthly savings.
 
@@ -279,7 +302,7 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 [Pension UI: InputForm, PensionTaxPanel]
         |
         v
-[BudgetTab: netMonthlyIncome prop]
+[BudgetFeature / BudgetProvider: netMonthlyIncome prop]
         |
         +-- expenditures (p1Amount, p1Total, section subtotals)
         +-- debts -> calculateAmortizingMonthlyPayment, calculateTotalInterest
@@ -287,9 +310,23 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
         +-- savings -> savingsTotal
         +-- p1Remain = netMonthlyIncome - p1Total - debtMonthlyTotal - creditCardMinimumTotal - savingsTotal
         +-- unexpected spending buffer (soft reserve; not in outgoings) -> availableForGoals = max(0, p1Remain - buffer)
+        |
+        +-- plannedMonthlyOutgoings.js: canonical mirror (pension-planner-budget-mirror) for App / Net Worth / Projection
 ```
 
-**Persistence side channels** (do not change formulas): `localStorage` mirror; Supabase `pension_inputs`, `budget_expenditures`, `budget_debts`, `budget_savings`, `budget_credit_cards`, `budget_settings` (unexpected spending buffer) when `user` is set.
+**Persistence side channels** (do not change formulas): `localStorage` — pension inputs; Budget **row** mirrors (keys in `persistence/keys.js`); **canonical Budget mirror** (`pension-planner-budget-mirror`) written by the adapter for cross-tab reads. Supabase: `pension_inputs`, `budget_expenditures`, `budget_debts`, `budget_savings`, `budget_credit_cards`, `budget_settings` (unexpected spending buffer), `projection_inputs` when `user` is set.
+
+---
+
+## Projection (`utils/projectionSummary.js`)
+
+**Inputs:** `projectionInputs` + `projectionSnapshot` from `App.jsx` (pension + net worth assets/liabilities + budget mirror savings + mortgage rows).
+
+**Projection inputs persistence:** Normalised defaults and device mirror in `utils/projectionDefaults.js` (`STORAGE_KEY_PROJECTION`). When signed in, `App.jsx` loads `projection_inputs` via `fetchProjectionInputsForUser` (`utils/projectionSupabase.js`); if no row exists, in-memory state is kept (typically the pre-login device mirror). Debounced `upsertProjectionInputsForUser` runs only after `projectionLoadedForUserId === user.id`, mirroring the Net Worth gate. UI persistence line matches Net Worth (`deriveNetWorthStorageStatus`).
+
+**Engine:** Monthly loop: add pension + cash + stock savings (escalated per year), then apply growth multipliers per asset class; property uses inflation rate only (no monthly contribution). Same loop accumulates cumulative user contributions for attribution.
+
+**Attribution (total assets only):** Each emitted row includes `assetAttribution`: `startingAssetsTotal`, `cumulativeContributions` (pension / stocks / cash + total), `cumulativeGrowth` (sum of per-asset growth), and `byAsset` with `starting`, `contributions`, `growth`, and `ending` for pension, stocks, cash, and property. Per-asset growth is `ending − starting − contributions` (property contributions 0). Liabilities are outside this breakdown.
 
 ---
 
@@ -300,8 +337,10 @@ This document maps **logic only** (not UI/styling): inputs, state, persistence, 
 | Tax constants and band tables | `src/data/taxRules.js` |
 | All pension/tax math | `src/utils/calculations.js` |
 | Loan formulas | `src/utils/debt.js` |
-| Budget defaults / row shape | `src/components/budgetConstants.js` |
+| Budget defaults / row shape | `src/features/budget/domain/expenditures.js` |
+| Budget cross-tab mirror + selectors | `src/features/budget/domain/plannedMonthlyOutgoings.js` |
+| Budget state + UI + sync | `src/features/budget/hooks/BudgetProvider.jsx` |
 | Orchestration + `position` | `src/App.jsx` |
+| Long-horizon projection + attribution | `src/utils/projectionSummary.js` |
 | Input annual/monthly conversion | `src/components/InputForm.jsx` |
 | Tax band + headline metrics + expandable detail | `src/components/PensionTaxPanel.jsx` |
-| Budget aggregations | `src/components/BudgetTab.jsx` |

@@ -2,12 +2,13 @@
 -- See README / DEPLOY.md.
 
 create table if not exists public.budget_savings (
-  id          text        primary key,
-  user_id     uuid        not null references auth.users (id) on delete cascade,
-  name        text        not null default '',
-  amount      numeric     not null,
-  sort_order  integer     not null default 0,
-  created_at  timestamptz default now()
+  id               text        primary key,
+  user_id          uuid        not null references auth.users (id) on delete cascade,
+  name             text        not null default '',
+  amount           numeric     not null,
+  allocation_type  text        not null default 'cash',
+  sort_order       integer     not null default 0,
+  created_at       timestamptz default now()
 );
 
 create index if not exists budget_savings_user_id_idx

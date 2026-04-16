@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { formatCurrency } from '../utils/calculations';
-import { annualAmountForDisplay } from '../utils/displayPeriodMoney';
-import { getLabel, periodSlashSuffix } from '../utils/fieldLabels';
+import { formatCurrency } from '../../../utils/calculations';
+import { annualAmountForDisplay } from '../../../utils/displayPeriodMoney';
+import { getLabel, periodSlashSuffix } from '../../../utils/fieldLabels';
 
 const r2 = (n) => Math.round(n * 100) / 100;
 
@@ -146,6 +146,7 @@ export default function PensionTaxPanel({
     netTakeHomeAfterPensionMonthly,
     netTakeHomeAfterPensionAnnual,
     studentLoanRepaymentAnnual = 0,
+    sharePlanPostTaxDeducted = 0,
   } = takeHome;
 
   const hasStudentLoan = studentLoanRepaymentAnnual > 0;
@@ -153,7 +154,8 @@ export default function PensionTaxPanel({
     ? (netTakeHomeAfterPensionMonthly ?? netTakeHomeMonthly)
     : (netTakeHomeAfterPensionAnnual ?? netTakeHomeAnnual);
   const afterAll = isMonthly ? netTakeHomeMonthly : netTakeHomeAnnual;
-  const headlineNet = hasStudentLoan ? afterAll : afterPensionBeforeLoan;
+  const headlineNet =
+    hasStudentLoan || sharePlanPostTaxDeducted > 0 ? afterAll : afterPensionBeforeLoan;
 
   const period = periodSlashSuffix(displayPeriod);
 

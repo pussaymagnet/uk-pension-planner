@@ -1,17 +1,31 @@
 /**
  * BudgetProvider — state + sync for the budget feature (Supabase + localStorage mirror).
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { calculateAmortizingMonthlyPayment } from '../../../utils/debt';
+import {
+  calculateMonthlyMortgagePayment,
+  getEffectiveExpenditureAmount,
+  HOUSING_MORTGAGE_CATEGORY,
+  normalizeMortgageMetadata,
+} from '../domain/mortgageExpenditure';
 import {
   SECTION_FIXED,
   SECTION_NICE,
   createDefaultExpenditures,
   normalizeCreditCardRow,
   normalizeExpenditureRow,
+  DEFAULT_EXPENDITURE_CATEGORY,
+  getExpenditureCategorySelectOptions,
+  isValidExpenditureCategory,
 } from '../domain/expenditures';
 import { computeGoalDerived } from '../domain/goalDerived';
 import { normalizeGoalSavingRow } from '../domain/goalRows';
+import { normalizeSavingRow } from '../domain/savingRows';
+import {
+  computePlannedMonthlyOutgoings,
+  syncBudgetMirrorToStorage,
+} from '../domain/plannedMonthlyOutgoings';
 import {
   STORAGE_KEY,
   STORAGE_KEY_DEBTS,
@@ -56,9 +70,20 @@ const fmt = (value) =>
 
 const r2 = (n) => Math.round((n ?? 0) * 100) / 100;
 
-const BLANK_FORM = { name: '', amount: '0', partner1Pct: '100', section: SECTION_FIXED };
+const EXPENDITURE_CATEGORY_FORM_OPTIONS = getExpenditureCategorySelectOptions();
+
+const BLANK_FORM = {
+  name: '',
+  amount: '0',
+  partner1Pct: '100',
+  section: SECTION_FIXED,
+  category: DEFAULT_EXPENDITURE_CATEGORY,
+  mortgageBalance: '',
+  mortgageAnnualRate: '',
+  mortgageTermYears: '',
+};
 const BLANK_DEBT_FORM = { name: '', principal: '', annualRate: '', termYears: '' };
-const BLANK_SAVINGS_FORM = { name: '', amount: '' };
+const BLANK_SAVINGS_FORM = { name: '', amount: '', allocationType: 'cash' };
 const BLANK_CREDIT_CARD_FORM = {
   name: '',
   totalBalance: '',
@@ -206,11 +231,14 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
         }
 
         if (savRes.data) {
-          const srows = savRes.data.map((r) => ({
-            id:     r.id,
-            name:   r.name ?? '',
-            amount: Number(r.amount),
-          }));
+          const srows = savRes.data.map((r) =>
+            normalizeSavingRow({
+              id: r.id,
+              name: r.name,
+              amount: r.amount,
+              allocationType: r.allocation_type ?? r.allocationType,
+            }),
+          );
           setSavings(srows);
           localStorage.setItem(STORAGE_KEY_SAVINGS, JSON.stringify(srows));
         }
@@ -285,7 +313,10 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
 
       try {
         const savedSavings = localStorage.getItem(STORAGE_KEY_SAVINGS);
-        if (savedSavings) setSavings(JSON.parse(savedSavings));
+        if (savedSavings) {
+          const parsed = JSON.parse(savedSavings);
+          if (Array.isArray(parsed)) setSavings(parsed.map((r) => normalizeSavingRow(r)));
+        }
       } catch {
         // ignore corrupt data
       }
@@ -352,6 +383,12 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
     localStorage.setItem(STORAGE_KEY_GOAL_SAVINGS, JSON.stringify(goalSavings));
   }, [goalSavings, user?.id]);
 
+  // Cross-tab canonical mirror (derived only) — same guard as goal rows so we don’t snapshot before cloud load finishes.
+  useEffect(() => {
+    if (user && loadedForUser.current !== user.id) return;
+    syncBudgetMirrorToStorage(expenditures, debts, savings, creditCards, goalSavings);
+  }, [expenditures, debts, savings, creditCards, goalSavings, user?.id]);
+
   useEffect(() => {
     if (!user || syncing) return;
     let cancelled = false;
@@ -371,9 +408,9 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
   }, [unexpectedSpendingBuffer, user, syncing]);
 
   // ── Derived calculations ──────────────────────────────────────────────────
-  const p1Amount = (exp) => r2((exp.partner1Pct / 100) * exp.amount);
-  const p1Total  = r2(expenditures.reduce((s, e) => s + p1Amount(e), 0));
-  const combined = r2(expenditures.reduce((s, e) => s + (e.amount ?? 0), 0));
+  const p1Amount = (exp) => r2((exp.partner1Pct / 100) * getEffectiveExpenditureAmount(exp));
+  const p1Total = r2(expenditures.reduce((s, e) => s + p1Amount(e), 0));
+  const combined = r2(expenditures.reduce((s, e) => s + getEffectiveExpenditureAmount(e), 0));
 
   const debtMonthly = (d) =>
     calculateAmortizingMonthlyPayment(d.principal, d.annualRatePct, d.termMonths);
@@ -388,8 +425,12 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
   const creditCardMinimumTotal = r2(
     creditCards.reduce((s, c) => s + (c.minimumMonthlyPayment ?? 0), 0),
   );
-  const p1CommittedTotal = r2(
-    p1Total + debtMonthlyTotal + savingsTotal + creditCardMinimumTotal,
+  const p1CommittedTotal = computePlannedMonthlyOutgoings(
+    expenditures,
+    debts,
+    savings,
+    creditCards,
+    goalSavings,
   );
 
   const p1Remain = r2(
@@ -408,10 +449,27 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
   const fixedExpenditures = expenditures.filter((e) => e.section === SECTION_FIXED);
   const niceExpenditures = expenditures.filter((e) => e.section === SECTION_NICE);
 
-  const fixedCombined = r2(fixedExpenditures.reduce((s, e) => s + (e.amount ?? 0), 0));
+  const fixedCombined = r2(fixedExpenditures.reduce((s, e) => s + getEffectiveExpenditureAmount(e), 0));
   const fixedP1Total = r2(fixedExpenditures.reduce((s, e) => s + p1Amount(e), 0));
-  const niceCombined = r2(niceExpenditures.reduce((s, e) => s + (e.amount ?? 0), 0));
+  const niceCombined = r2(niceExpenditures.reduce((s, e) => s + getEffectiveExpenditureAmount(e), 0));
   const niceP1Total = r2(niceExpenditures.reduce((s, e) => s + p1Amount(e), 0));
+
+  const derivedMortgagePaymentPreview = useMemo(() => {
+    if (formValues.category !== HOUSING_MORTGAGE_CATEGORY) return null;
+    const ty = parseFloat(formValues.mortgageTermYears);
+    const n = Number.isFinite(ty) && ty > 0 ? Math.max(1, Math.round(ty * 12)) : 0;
+    const m = normalizeMortgageMetadata({
+      currentBalance: formValues.mortgageBalance,
+      annualInterestRate: formValues.mortgageAnnualRate,
+      remainingTermMonths: n,
+    });
+    return calculateMonthlyMortgagePayment(m.currentBalance, m.annualInterestRate, m.remainingTermMonths);
+  }, [
+    formValues.category,
+    formValues.mortgageBalance,
+    formValues.mortgageAnnualRate,
+    formValues.mortgageTermYears,
+  ]);
 
   // ── Form helpers ──────────────────────────────────────────────────────────
   const openAddExpenditure = (section) => {
@@ -435,11 +493,23 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
     setEditingCreditCardId(null);
     setEditingDebtId(null);
     setEditingId(exp.id);
+    const cat =
+      exp.category && isValidExpenditureCategory(exp.category)
+        ? exp.category
+        : DEFAULT_EXPENDITURE_CATEGORY;
+    const mm = normalizeMortgageMetadata(exp.metadata);
+    const yrs = mm.remainingTermMonths > 0 ? mm.remainingTermMonths / 12 : 0;
     setFormValues({
-      name:        exp.name,
-      amount:      String(exp.amount ?? 0),
+      name: exp.name,
+      amount: String(
+        cat === HOUSING_MORTGAGE_CATEGORY ? getEffectiveExpenditureAmount(exp) : (exp.amount ?? 0),
+      ),
       partner1Pct: String(exp.partner1Pct),
-      section:     exp.section === SECTION_NICE ? SECTION_NICE : SECTION_FIXED,
+      section: exp.section === SECTION_NICE ? SECTION_NICE : SECTION_FIXED,
+      category: cat,
+      mortgageBalance: String(mm.currentBalance ?? ''),
+      mortgageAnnualRate: String(mm.annualInterestRate ?? ''),
+      mortgageTermYears: mm.remainingTermMonths > 0 ? String(r2(yrs)) : '',
     });
     setErrors({});
     setShowForm(true);
@@ -499,7 +569,7 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
     setEditingId(null);
     setEditingDebtId(null);
     setEditingSavingId(null);
-    setSavingsFormValues(BLANK_SAVINGS_FORM);
+    setSavingsFormValues({ ...BLANK_SAVINGS_FORM });
     setSavingsErrors({});
     setShowSavingsForm(true);
   };
@@ -514,7 +584,11 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
     setEditingId(null);
     setEditingDebtId(null);
     setEditingSavingId(sv.id);
-    setSavingsFormValues({ name: sv.name || '', amount: String(sv.amount) });
+    setSavingsFormValues({
+      name: sv.name || '',
+      amount: String(sv.amount),
+      allocationType: sv.allocationType === 'stocks' ? 'stocks' : 'cash',
+    });
     setSavingsErrors({});
     setShowSavingsForm(true);
   };
@@ -646,9 +720,18 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
   const validate = useCallback(() => {
     const errs = {};
     if (!formValues.name.trim()) errs.name = 'Please enter a cost name.';
-    const amt = parseFloat(formValues.amount);
-    if (formValues.amount === '' || isNaN(amt) || amt < 0) {
-      errs.amount = 'Please enter zero or a positive amount.';
+    if (formValues.category === HOUSING_MORTGAGE_CATEGORY) {
+      const bal = parseFloat(formValues.mortgageBalance);
+      const rate = parseFloat(formValues.mortgageAnnualRate);
+      const ty = parseFloat(formValues.mortgageTermYears);
+      if (!Number.isFinite(bal) || bal <= 0) errs.mortgageBalance = 'Enter the current mortgage balance.';
+      if (!Number.isFinite(rate) || rate < 0) errs.mortgageAnnualRate = 'Enter annual interest rate (0 or more).';
+      if (!Number.isFinite(ty) || ty <= 0) errs.mortgageTermYears = 'Enter remaining term in years.';
+    } else {
+      const amt = parseFloat(formValues.amount);
+      if (formValues.amount === '' || isNaN(amt) || amt < 0) {
+        errs.amount = 'Please enter zero or a positive amount.';
+      }
     }
     const pct = parseFloat(formValues.partner1Pct);
     if (isNaN(pct) || pct < 0 || pct > 100) errs.partner1Pct = 'Percentage must be 0–100.';
@@ -747,12 +830,44 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
     if (Object.keys(errs).length) { setErrors(errs); return; }
 
     const section = formValues.section === SECTION_NICE ? SECTION_NICE : SECTION_FIXED;
+    const prev = editingId ? expenditures.find((e) => e.id === editingId) : null;
+    let category = formValues.category;
+    if (!isValidExpenditureCategory(category)) category = DEFAULT_EXPENDITURE_CATEGORY;
+    const metadata =
+      prev?.metadata &&
+      typeof prev.metadata === 'object' &&
+      !Array.isArray(prev.metadata)
+        ? { ...prev.metadata }
+        : {};
+    if (category === HOUSING_MORTGAGE_CATEGORY) {
+      const ty = parseFloat(formValues.mortgageTermYears);
+      const remainingTermMonths = Number.isFinite(ty) && ty > 0 ? Math.max(1, Math.round(ty * 12)) : 0;
+      const bal = parseFloat(formValues.mortgageBalance);
+      const rate = parseFloat(formValues.mortgageAnnualRate);
+      metadata.currentBalance = r2(Number.isFinite(bal) ? Math.max(0, bal) : 0);
+      metadata.annualInterestRate = r2(Number.isFinite(rate) ? Math.max(0, rate) : 0);
+      metadata.remainingTermMonths = remainingTermMonths;
+    } else {
+      delete metadata.currentBalance;
+      delete metadata.annualInterestRate;
+      delete metadata.remainingTermMonths;
+    }
+    const mm = normalizeMortgageMetadata(metadata);
     const entry = {
-      id:          editingId ?? uid(),
-      name:        formValues.name.trim(),
-      amount:      r2(parseFloat(formValues.amount === '' ? '0' : formValues.amount)),
+      id: editingId ?? uid(),
+      name: formValues.name.trim(),
+      amount:
+        category === HOUSING_MORTGAGE_CATEGORY
+          ? calculateMonthlyMortgagePayment(
+              mm.currentBalance,
+              mm.annualInterestRate,
+              mm.remainingTermMonths,
+            )
+          : r2(parseFloat(formValues.amount === '' ? '0' : formValues.amount)),
       partner1Pct: r2(parseFloat(formValues.partner1Pct)),
       section,
+      category,
+      metadata,
     };
 
     let nextList;
@@ -803,7 +918,9 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
         <div className="min-w-0 flex-1 pr-2">
           <p className="truncate text-sm font-medium text-slate-800">{exp.name}</p>
           <p className="mt-0.5 text-xs tabular-nums text-slate-500">
-            {fmt(exp.amount)} total · {exp.partner1Pct}% your share
+            {exp.category === HOUSING_MORTGAGE_CATEGORY
+              ? `${fmt(getEffectiveExpenditureAmount(exp))} calculated payment · ${exp.partner1Pct}% your share`
+              : `${fmt(exp.amount)} total · ${exp.partner1Pct}% your share`}
           </p>
         </div>
         <p className="shrink-0 text-right text-lg font-semibold tracking-tight tabular-nums text-slate-900">
@@ -891,6 +1008,7 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
       id:     editingSavingId ?? uid(),
       name:   savingsFormValues.name.trim(),
       amount: r2(parseFloat(savingsFormValues.amount)),
+      allocationType: savingsFormValues.allocationType === 'stocks' ? 'stocks' : 'cash',
     };
 
     let nextList;
@@ -1144,6 +1262,9 @@ export function BudgetProvider({ netMonthlyIncome = 0, user = null }) {
           <HouseholdCostsSection
             SECTION_FIXED={SECTION_FIXED}
             SECTION_NICE={SECTION_NICE}
+            HOUSING_MORTGAGE_CATEGORY={HOUSING_MORTGAGE_CATEGORY}
+            expenditureCategoryOptions={EXPENDITURE_CATEGORY_FORM_OPTIONS}
+            derivedMortgagePaymentPreview={derivedMortgagePaymentPreview}
             showForm={showForm}
             editingId={editingId}
             formValues={formValues}

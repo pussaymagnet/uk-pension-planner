@@ -1,4 +1,7 @@
-/** localStorage keys for budget offline mirror (must stay stable for existing users) */
+/**
+ * Budget feature–internal row/offline keys (stable for existing users).
+ * Cross-tab derived data: use `plannedMonthlyOutgoings.js` (`readBudgetMirror`, selectors) — do not read these keys outside Budget + adapter.
+ */
 export const STORAGE_KEY = 'pension-planner-budget';
 export const STORAGE_KEY_DEBTS = 'pension-planner-budget-debts';
 export const STORAGE_KEY_SAVINGS = 'pension-planner-budget-savings';

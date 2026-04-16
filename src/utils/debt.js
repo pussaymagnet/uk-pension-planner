@@ -39,3 +39,24 @@ export function calculateTotalInterest(principal, monthlyPayment, termMonths) {
   const total = m * n - P;
   return Math.round(Math.max(0, total) * 100) / 100;
 }
+
+const r2d = (n) => Math.round((n ?? 0) * 100) / 100;
+
+/**
+ * One monthly step of mortgage balance reduction (principal only pays down debt).
+ * @param {number} balance
+ * @param {number} annualRatePercent
+ * @param {number} scheduledPayment
+ * @returns {{ interest: number, principal: number, nextBalance: number }}
+ */
+export function calculateMortgageAmortizationStep(balance, annualRatePercent, scheduledPayment) {
+  const P = Math.max(0, Number(balance) || 0);
+  const pay = Math.max(0, Number(scheduledPayment) || 0);
+  if (P <= 0) return { interest: 0, principal: 0, nextBalance: 0 };
+  const apr = Number(annualRatePercent);
+  const r = !Number.isFinite(apr) || apr === 0 ? 0 : (apr / 100) / 12;
+  const interest = r === 0 ? 0 : r2d(P * r);
+  const principal = r2d(Math.max(0, pay - interest));
+  const nextBalance = Math.max(0, r2d(P - principal));
+  return { interest, principal, nextBalance };
+}

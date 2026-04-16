@@ -6,6 +6,8 @@ This project uses **hand-run scripts** in the Supabase Dashboard **SQL Editor** 
 |--------|-----|
 | [`budget/`](./budget/) | Household Budget tab (tables/columns for expenditures, debts, savings, credit cards, settings, savings goals) |
 | [`pension/`](./pension/) | Pension inputs (`pension_inputs` columns and related) |
+| [`net_worth/`](./net_worth/) | Net Worth tab (`net_worth_inputs` per-user row) |
+| [`projection/`](./projection/) | Projection tab (`projection_inputs` per-user row; cash vs stocks routing uses `budget/budget_savings_allocation_type.sql`) |
 
 ## Apply tracking: `sql-manifest.json`
 

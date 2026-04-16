@@ -2,7 +2,11 @@
  * All Supabase access for budget_* tables. UI layers should import from here only.
  */
 import { supabase } from '../../../lib/supabase';
-import { SECTION_FIXED, SECTION_NICE } from '../domain/expenditures';
+import {
+  DEFAULT_EXPENDITURE_CATEGORY,
+  SECTION_FIXED,
+  SECTION_NICE,
+} from '../domain/expenditures';
 
 const r2 = (n) => Math.round((n ?? 0) * 100) / 100;
 
@@ -42,6 +46,12 @@ export function fetchBudgetDataBundle(userId) {
 }
 
 export async function upsertExpenditureRow(userId, entry, sortOrder) {
+  const category =
+    typeof entry.category === 'string' && entry.category ? entry.category : DEFAULT_EXPENDITURE_CATEGORY;
+  const metadata =
+    entry.metadata && typeof entry.metadata === 'object' && !Array.isArray(entry.metadata)
+      ? entry.metadata
+      : {};
   await supabase.from('budget_expenditures').upsert(
     {
       id: entry.id,
@@ -50,6 +60,8 @@ export async function upsertExpenditureRow(userId, entry, sortOrder) {
       amount: entry.amount,
       partner1_pct: entry.partner1Pct,
       section: entry.section === SECTION_NICE ? SECTION_NICE : SECTION_FIXED,
+      category,
+      metadata,
       sort_order: sortOrder,
     },
     { onConflict: 'id' },
@@ -80,12 +92,14 @@ export async function deleteDebtRow(id) {
 }
 
 export async function upsertSavingRow(userId, entry, sortOrder) {
+  const allocationType = entry.allocationType === 'stocks' ? 'stocks' : 'cash';
   await supabase.from('budget_savings').upsert(
     {
       id: entry.id,
       user_id: userId,
       name: entry.name,
       amount: entry.amount,
+      allocation_type: allocationType,
       sort_order: sortOrder,
     },
     { onConflict: 'id' },

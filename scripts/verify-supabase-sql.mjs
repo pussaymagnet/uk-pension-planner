@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Ensure every .sql file under supabase/budget/ and supabase/pension/
+ * Ensure every .sql file under supabase/budget/, pension/, net_worth/, projection/
  * appears in supabase/sql-manifest.json, and every manifest path exists on disk.
  */
 
@@ -34,6 +34,8 @@ const manifestPaths = new Set(manifest.scripts.map((s) => s.path));
 const onDisk = [
   ...collectSqlFiles(path.join(supabaseRoot, 'budget')),
   ...collectSqlFiles(path.join(supabaseRoot, 'pension')),
+  ...collectSqlFiles(path.join(supabaseRoot, 'net_worth')),
+  ...collectSqlFiles(path.join(supabaseRoot, 'projection')),
 ].sort();
 
 const missingInManifest = onDisk.filter((p) => !manifestPaths.has(p));

@@ -6,6 +6,9 @@ import { SectionCard, Label } from './BudgetPrimitives';
 export function HouseholdCostsSection({
   SECTION_FIXED,
   SECTION_NICE,
+  HOUSING_MORTGAGE_CATEGORY,
+  expenditureCategoryOptions = [],
+  derivedMortgagePaymentPreview = null,
   showForm,
   editingId,
   formValues,
@@ -68,24 +71,106 @@ export function HouseholdCostsSection({
               </select>
             </div>
 
-            <div>
-              <Label htmlFor="exp-amount">Monthly amount (£)</Label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">£</span>
-                <input
-                  id="exp-amount"
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="0"
-                  value={formValues.amount}
-                  onChange={(e) => handleFormChange('amount', e.target.value)}
-                  className={`w-full pl-7 pr-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500
-                    ${errors.amount ? 'border-red-400' : 'border-slate-300'}`}
-                />
-              </div>
-              {errors.amount && <p className="text-xs text-red-500 mt-1">{errors.amount}</p>}
+            <div className="sm:col-span-2">
+              <Label htmlFor="exp-category">Cost type</Label>
+              <p className="text-xs text-slate-500 mb-1.5">
+                Used for future planning tools; the name above is what you see in the list.
+              </p>
+              <select
+                id="exp-category"
+                value={formValues.category ?? 'other'}
+                onChange={(e) => handleFormChange('category', e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                {expenditureCategoryOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </div>
+
+            {formValues.category === HOUSING_MORTGAGE_CATEGORY ? (
+              <>
+                <div>
+                  <Label htmlFor="exp-mort-bal">Mortgage balance (£)</Label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">£</span>
+                    <input
+                      id="exp-mort-bal"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={formValues.mortgageBalance}
+                      onChange={(e) => handleFormChange('mortgageBalance', e.target.value)}
+                      className={`w-full pl-7 pr-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                        ${errors.mortgageBalance ? 'border-red-400' : 'border-slate-300'}`}
+                    />
+                  </div>
+                  {errors.mortgageBalance && (
+                    <p className="text-xs text-red-500 mt-1">{errors.mortgageBalance}</p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="exp-mort-rate">Annual interest rate (%)</Label>
+                  <input
+                    id="exp-mort-rate"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formValues.mortgageAnnualRate}
+                    onChange={(e) => handleFormChange('mortgageAnnualRate', e.target.value)}
+                    className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                      ${errors.mortgageAnnualRate ? 'border-red-400' : 'border-slate-300'}`}
+                  />
+                  {errors.mortgageAnnualRate && (
+                    <p className="text-xs text-red-500 mt-1">{errors.mortgageAnnualRate}</p>
+                  )}
+                </div>
+                <div className="sm:col-span-2">
+                  <Label htmlFor="exp-mort-term">Remaining term (years)</Label>
+                  <input
+                    id="exp-mort-term"
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    value={formValues.mortgageTermYears}
+                    onChange={(e) => handleFormChange('mortgageTermYears', e.target.value)}
+                    className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                      ${errors.mortgageTermYears ? 'border-red-400' : 'border-slate-300'}`}
+                  />
+                  {errors.mortgageTermYears && (
+                    <p className="text-xs text-red-500 mt-1">{errors.mortgageTermYears}</p>
+                  )}
+                </div>
+                <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                  <p className="text-xs font-medium text-slate-600">Calculated monthly payment</p>
+                  <p className="text-lg font-semibold tabular-nums text-slate-900">{fmt(derivedMortgagePaymentPreview ?? 0)}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    From balance, rate, and term. Your share % applies below.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <div>
+                <Label htmlFor="exp-amount">Monthly amount (£)</Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">£</span>
+                  <input
+                    id="exp-amount"
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="0"
+                    value={formValues.amount}
+                    onChange={(e) => handleFormChange('amount', e.target.value)}
+                    className={`w-full pl-7 pr-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                      ${errors.amount ? 'border-red-400' : 'border-slate-300'}`}
+                  />
+                </div>
+                {errors.amount && <p className="text-xs text-red-500 mt-1">{errors.amount}</p>}
+              </div>
+            )}
 
             <div>
               <Label htmlFor="exp-p1pct">My share %</Label>

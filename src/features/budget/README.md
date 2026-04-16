@@ -7,7 +7,7 @@ The Budget area is a **standalone monthly planning module**. It is implemented u
 The app shell should only mount:
 
 - `BudgetFeature` with props:
-  - **`netMonthlyIncome`** — monthly take-home cash after tax, NI, and pension (computed once in `App.jsx`).
+  - **`netMonthlyIncome`** — monthly take-home cash after tax, NI, pension, share plan (pre/post per Pension tab), and Scottish Plan 4 student loan when applicable (computed once in `App.jsx`).
   - **`user`** — authenticated Supabase user or `null` for offline/local-only mode.
 
 ## Boundaries

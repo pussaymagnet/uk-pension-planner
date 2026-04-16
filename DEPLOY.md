@@ -81,6 +81,10 @@ Run [`supabase/budget/budget_goal_savings.sql`](./supabase/budget/budget_goal_sa
 
 Run [`supabase/pension/pension_inputs_tax_region.sql`](./supabase/pension/pension_inputs_tax_region.sql) once in the **SQL Editor** to add the `tax_region` column on `pension_inputs`. Without it, saving the England/Scotland toggle while signed in may fail. The app still works offline with `localStorage`.
 
+## Supabase: Net Worth (signed-in sync)
+
+Run [`supabase/net_worth/net_worth_inputs.sql`](./supabase/net_worth/net_worth_inputs.sql) once in the **SQL Editor** to create the `net_worth_inputs` table. Without it, signed-in Net Worth changes stay on `localStorage` only (the app still works offline). Mark the script `applied` in [`supabase/sql-manifest.json`](./supabase/sql-manifest.json) after you run it.
+
 ## Supabase: pension inputs (bonus, share plan, student loan)
 
 If you use signed-in sync for pension inputs, run these in the **SQL Editor** when your app version expects the columns:
